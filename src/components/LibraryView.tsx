@@ -31,23 +31,65 @@ export default function LibraryView({
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [lastClickedId, setLastClickedId] = useState<string | null>(null);
+  const [sortConfig, setSortConfig] = useState<{ key: "sno" | "title" | "album" | "dateAdded" | "duration"; asc: boolean } | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
     songIds: string[];
   } | null>(null);
 
+  const handleSort = (key: "sno" | "title" | "album" | "dateAdded" | "duration") => {
+    setSortConfig((prev) => {
+      if (prev?.key === key) {
+        if (prev.asc) return { key, asc: false };
+        return null;
+      }
+      return { key, asc: true };
+    });
+  };
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return songs;
-    return songs.filter(
-      (s) =>
-        s.title.toLowerCase().includes(q) ||
-        s.artist.toLowerCase().includes(q) ||
-        s.album.toLowerCase().includes(q) ||
-        s.fileName.toLowerCase().includes(q)
-    );
-  }, [songs, query]);
+    let result = songs.map((song, index) => ({ song, originalIndex: index }));
+    
+    if (q) {
+      result = result.filter(
+        ({ song: s }) =>
+          s.title.toLowerCase().includes(q) ||
+          s.artist.toLowerCase().includes(q) ||
+          s.album.toLowerCase().includes(q) ||
+          s.fileName.toLowerCase().includes(q)
+      );
+    }
+    
+    if (sortConfig) {
+      result.sort((a, b) => {
+        let cmp = 0;
+        const sA = a.song;
+        const sB = b.song;
+        switch (sortConfig.key) {
+          case "title":
+            cmp = sA.title.localeCompare(sB.title) || sA.artist.localeCompare(sB.artist);
+            break;
+          case "album":
+            cmp = (sA.album || "").localeCompare(sB.album || "");
+            break;
+          case "dateAdded":
+            cmp = (sA.addedAt || 0) - (sB.addedAt || 0);
+            break;
+          case "duration":
+            cmp = (sA.duration || 0) - (sB.duration || 0);
+            break;
+          case "sno":
+            cmp = a.originalIndex - b.originalIndex;
+            break;
+        }
+        return sortConfig.asc ? cmp : -cmp;
+      });
+    }
+
+    return result.map((r) => r.song);
+  }, [songs, query, sortConfig]);
 
   const handleRowClick = (e: React.MouseEvent, song: Song, index: number) => {
     // Shift → range select from anchor
@@ -155,12 +197,20 @@ export default function LibraryView({
         <div className="rounded-md select-none">
           <div className="sticky top-0 z-10 grid grid-cols-[auto_16px_4fr_3fr_2fr_minmax(120px,1fr)] gap-4 border-b border-[#2a2a2a] bg-spotify-black/80 px-4 pb-2 pt-2 text-xs font-medium uppercase tracking-wider text-spotify-lightgray backdrop-blur">
             <div className="w-6" />
-            <div>#</div>
-            <div>Title</div>
-            <div>Album</div>
-            <div>Date added</div>
-            <div className="flex justify-end">
-              <Clock className="h-4 w-4" />
+            <div className="cursor-pointer hover:text-white flex items-center gap-1" onClick={() => handleSort("sno")}>
+              # {sortConfig?.key === "sno" && (sortConfig.asc ? "↑" : "↓")}
+            </div>
+            <div className="cursor-pointer hover:text-white flex items-center gap-1" onClick={() => handleSort("title")}>
+              Title {sortConfig?.key === "title" && (sortConfig.asc ? "↑" : "↓")}
+            </div>
+            <div className="cursor-pointer hover:text-white flex items-center gap-1" onClick={() => handleSort("album")}>
+              Album {sortConfig?.key === "album" && (sortConfig.asc ? "↑" : "↓")}
+            </div>
+            <div className="cursor-pointer hover:text-white flex items-center gap-1" onClick={() => handleSort("dateAdded")}>
+              Date added {sortConfig?.key === "dateAdded" && (sortConfig.asc ? "↑" : "↓")}
+            </div>
+            <div className="flex justify-end items-center gap-1 cursor-pointer hover:text-white" onClick={() => handleSort("duration")}>
+              {sortConfig?.key === "duration" && (sortConfig.asc ? "↑" : "↓")} <Clock className="h-4 w-4" />
             </div>
           </div>
 
