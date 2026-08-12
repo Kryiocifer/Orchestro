@@ -694,7 +694,7 @@ export async function removeSongsBatch(songIds: string[]): Promise<void> {
   await Promise.all(
     toRemove.map(async (song) => {
       try {
-        await remove(song.path);
+        await invoke("delete_file_arbitrary", { path: song.path });
       } catch (err) {
         console.warn("Could not delete file from disk:", err);
       }

@@ -335,6 +335,11 @@ fn read_file_head(path: String, max_bytes: usize) -> Result<Vec<u8>, String> {
 }
 
 #[tauri::command]
+fn delete_file_arbitrary(path: String) -> Result<(), String> {
+    std::fs::remove_file(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn yt_download_cancel(job_id: String) -> Result<(), String> {
     let pid = {
         let mut guard = pids();
@@ -668,6 +673,7 @@ pub fn run() {
             yt_download,
             yt_download_cancel,
             read_file_head,
+            delete_file_arbitrary,
             yt_dlp_status,
             yt_dlp_update
         ])
