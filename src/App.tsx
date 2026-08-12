@@ -998,6 +998,10 @@ function App() {
     }));
     if (currentSongRef.current && idSet.has(currentSongRef.current.id)) {
       audioRef.current?.pause();
+      if (audioRef.current) {
+        audioRef.current.removeAttribute('src');
+        audioRef.current.load();
+      }
       setCurrentSong(null);
       setIsPlaying(false);
       setProgress(0);
