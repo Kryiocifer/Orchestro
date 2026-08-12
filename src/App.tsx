@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import toast from "react-hot-toast";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import Sidebar from "./components/Sidebar";
 import PlayerBar, { RepeatMode } from "./components/PlayerBar";
 import LibraryView from "./components/LibraryView";
 import PlaylistView from "./components/PlaylistView";
 import HomeView from "./components/HomeView";
 import YouTubeView from "./components/YouTubeView";
+import ImportView from "./components/ImportView";
 import DownloadPanel, { DownloadJob } from "./components/DownloadPanel";
 import {
   loadLibrary,
@@ -16,6 +19,8 @@ import {
   addSongToPlaylist,
   removeSongsBatch,
   hydrateMissingDurations,
+  pruneMissingSongs,
+  setSpotifyCredentials,
   saveLibrary,
   setMusicFolder,
   scanMusicFolder,
@@ -42,6 +47,7 @@ function App() {
   const [isScanning, setIsScanning] = useState(false);
   const [downloadJobs, setDownloadJobs] = useState<DownloadJob[]>([]);
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
+
 
   useEffect(() => {
     if (downloadJobs.some((j) => j.status === "downloading" || j.status === "queued" || j.status === "converting")) {
@@ -114,12 +120,13 @@ function App() {
     repeatRef.current = repeatMode;
   }, [repeatMode]);
 
-  // Load library on mount (and strip any leftover duplicates)
+  // Load library on mount — drop missing files, strip duplicates
   useEffect(() => {
-    loadLibrary().then((data) => {
+    (async () => {
+      const { library: pruned, removed } = await pruneMissingSongs();
       const seen = new Set<string>();
       const songs = [];
-      for (const s of data.songs) {
+      for (const s of pruned.songs) {
         const key = (s.fileName || s.title || s.id)
           .trim()
           .toLowerCase()
@@ -128,9 +135,15 @@ function App() {
         seen.add(key);
         songs.push(s);
       }
-      setLibrary({ ...data, songs });
+      setLibrary({ ...pruned, songs });
+      if (removed > 0) {
+        toast(`${removed} missing file${removed > 1 ? "s" : ""} removed from library`, {
+          icon: "🧹",
+          duration: 3000,
+        });
+      }
       void runDurationHydration(songs);
-    });
+    })();
     return () => {
       hydrateCancelRef.current = true;
     };
@@ -841,10 +854,13 @@ function App() {
   const handlePickDownloadFolder = async () => {
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
+      // Prefer last download folder — never fall back to music folder
+      // (Windows otherwise reopens the previous dialog path, often Music Folder)
       const selected = await open({
         directory: true,
         multiple: false,
         title: "Choose download folder for YouTube audio",
+        defaultPath: library.downloadFolder || undefined,
       });
       if (!selected || Array.isArray(selected)) return;
       const fresh = await setDownloadFolder(selected);
@@ -867,6 +883,198 @@ function App() {
       toast.success("Song saved to folder and library");
     }
   };
+  const handleYtDownloadedRef = useRef(handleYtDownloaded);
+  handleYtDownloadedRef.current = handleYtDownloaded;
+
+  const downloadProcessingRef = useRef(false);
+  const downloadJobsRef = useRef(downloadJobs);
+  const downloadFolderRef = useRef(library.downloadFolder);
+  downloadJobsRef.current = downloadJobs;
+  downloadFolderRef.current = library.downloadFolder;
+
+  // Global download queue — mount once. Do NOT depend on downloadJobs
+  // (that cancelled the pump after every status update and left the rest stuck).
+  useEffect(() => {
+    let alive = true;
+
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    const processOne = async (next: DownloadJob) => {
+      const folder = downloadFolderRef.current;
+      if (!folder) return;
+
+      setDownloadJobs((prev) =>
+        prev.map((j) =>
+          j.id === next.id ? { ...j, status: "downloading", percent: 1 } : j
+        )
+      );
+
+      try {
+        let url = next.message || "";
+        if (!url) throw new Error("Missing download URL");
+
+        if (url.startsWith("search:")) {
+          const query = url.slice(7).trim();
+          if (!query) throw new Error("Empty search query");
+          setDownloadJobs((prev) =>
+            prev.map((j) =>
+              j.id === next.id
+                ? {
+                    ...j,
+                    status: "downloading",
+                    percent: 2,
+                    message: "Searching…",
+                  }
+                : j
+            )
+          );
+          const results = await invoke<{ url: string }[]>("yt_search", {
+            query,
+          });
+          if (!results?.length || !results[0].url) {
+            throw new Error(`No YouTube match for: ${query}`);
+          }
+          url = results[0].url;
+        }
+
+        const filePath = await invoke<string>("yt_download", {
+          url,
+          outputDir: folder,
+          jobId: next.id,
+        });
+
+        // Fast path: add to library without spamming toasts on bulk imports
+        try {
+          const fileName = filePath.split(/[/\\]/).pop() || next.title;
+          await addSongFromPath(filePath, fileName, 0);
+        } catch {
+          /* still mark done — file is on disk */
+        }
+
+        if (alive) {
+          setDownloadJobs((prev) =>
+            prev.map((j) =>
+              j.id === next.id ? { ...j, status: "done", percent: 100 } : j
+            )
+          );
+        }
+      } catch (err) {
+        if (alive) {
+          const msg = String(err);
+          const wasCancelled = /cancel/i.test(msg);
+          setDownloadJobs((prev) =>
+            prev.map((j) =>
+              j.id === next.id
+                ? {
+                    ...j,
+                    status: wasCancelled ? "cancelled" : "error",
+                    message: wasCancelled ? "Cancelled" : msg,
+                    percent: 0,
+                  }
+                : j
+            )
+          );
+        }
+      }
+    };
+
+    const loop = async () => {
+      let doneSinceRefresh = 0;
+      while (alive) {
+        if (downloadProcessingRef.current) {
+          await sleep(250);
+          continue;
+        }
+        const next = downloadJobsRef.current.find((j) => j.status === "queued");
+        if (!next) {
+          // Periodic library refresh after a batch drains
+          if (doneSinceRefresh > 0) {
+            try {
+              const fresh = await loadLibrary();
+              setLibrary(fresh);
+            } catch {
+              /* ignore */
+            }
+            doneSinceRefresh = 0;
+          }
+          await sleep(500);
+          continue;
+        }
+        if (
+          downloadJobsRef.current.find((j) => j.id === next.id)?.status ===
+          "cancelled"
+        ) {
+          await sleep(100);
+          continue;
+        }
+        if (!downloadFolderRef.current) {
+          await sleep(1000);
+          continue;
+        }
+
+        downloadProcessingRef.current = true;
+        try {
+          await processOne(next);
+          doneSinceRefresh++;
+          // Refresh library every 5 completed jobs (not every song — much faster)
+          if (doneSinceRefresh >= 5) {
+            try {
+              const fresh = await loadLibrary();
+              setLibrary(fresh);
+            } catch {
+              /* ignore */
+            }
+            doneSinceRefresh = 0;
+          }
+        } finally {
+          downloadProcessingRef.current = false;
+        }
+      }
+    };
+
+    loop();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<{
+      job_id: string;
+      percent: number;
+      status: string;
+      message: string;
+    }>("yt-download-progress", (event) => {
+      const p = event.payload;
+      setDownloadJobs((prev) =>
+        prev.map((j) =>
+          j.id === p.job_id
+            ? {
+                ...j,
+                percent: p.percent,
+                status:
+                  p.status === "done"
+                    ? "done"
+                    : p.status === "cancelled"
+                    ? "cancelled"
+                    : p.status === "error"
+                    ? "error"
+                    : p.status === "converting"
+                    ? "converting"
+                    : "downloading",
+                message: p.message,
+              }
+            : j
+        )
+      );
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, []);
 
   const handleImportPlaylist = async () => {
     try {
@@ -1100,6 +1308,19 @@ function App() {
               onAddSongs={handleAddSongsClick}
             />
           )}
+          {currentView === "import" && (
+            <ImportView
+              downloadFolder={library.downloadFolder}
+              onPickDownloadFolder={handlePickDownloadFolder}
+              jobs={downloadJobs}
+              setJobs={setDownloadJobs}
+              spotifyClientId={library.spotifyClientId}
+              onSaveSpotifyClientId={async (id) => {
+                const fresh = await setSpotifyCredentials(id, null);
+                setLibrary(fresh);
+              }}
+            />
+          )}
           {currentView === "youtube" && (
             <YouTubeView
               downloadFolder={library.downloadFolder}
@@ -1151,7 +1372,6 @@ function App() {
         onCancel={async (jobId) => {
           try {
             const { invoke } = await import("@tauri-apps/api/core");
-            // Mark cancelled in UI immediately
             setDownloadJobs((prev) =>
               prev.map((j) =>
                 j.id === jobId
@@ -1162,6 +1382,33 @@ function App() {
             await invoke("yt_download_cancel", { jobId });
           } catch (err) {
             console.error("Cancel failed:", err);
+          }
+        }}
+        onCancelAll={async () => {
+          const active = downloadJobs.filter(
+            (j) =>
+              j.status === "queued" ||
+              j.status === "downloading" ||
+              j.status === "converting"
+          );
+          setDownloadJobs((prev) =>
+            prev.map((j) =>
+              j.status === "queued" ||
+              j.status === "downloading" ||
+              j.status === "converting"
+                ? { ...j, status: "cancelled" as const, message: "Cancelled" }
+                : j
+            )
+          );
+          try {
+            const { invoke } = await import("@tauri-apps/api/core");
+            await Promise.all(
+              active.map((j) =>
+                invoke("yt_download_cancel", { jobId: j.id }).catch(() => null)
+              )
+            );
+          } catch (err) {
+            console.error("Stop all failed:", err);
           }
         }}
       />

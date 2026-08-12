@@ -54,7 +54,6 @@ export default function YouTubeView({
   );
 
   // Queue processor refs
-  const processingRef = useRef(false);
   const jobsRef = useRef(jobs);
   const folderRef = useRef(downloadFolder);
   const onDownloadedRef = useRef(onDownloaded);
@@ -177,82 +176,8 @@ export default function YouTubeView({
     return () => unlisten?.();
   }, [setJobs]);
 
-  // Sequential queue worker — never cancels previous; drains queued jobs one by one
-  useEffect(() => {
-    let cancelled = false;
+  // Queue worker lives in App.tsx (global)
 
-    const pump = async () => {
-      if (processingRef.current || cancelled) return;
-      const next = jobsRef.current.find((j) => j.status === "queued");
-      if (!next) return;
-      // If user cancelled before start
-      if (
-        jobsRef.current.find((j) => j.id === next.id)?.status === "cancelled"
-      ) {
-        processingRef.current = false;
-        return;
-      }
-
-      const folder = folderRef.current;
-      if (!folder) return;
-
-      processingRef.current = true;
-      setJobs((prev) =>
-        prev.map((j) =>
-          j.id === next.id ? { ...j, status: "downloading", percent: 1 } : j
-        )
-      );
-
-      try {
-        // Find original URL from job message field we store as url
-        const url = next.message || "";
-        if (!url) throw new Error("Missing download URL");
-
-        const filePath = await invoke<string>("yt_download", {
-          url,
-          outputDir: folder,
-          jobId: next.id,
-        });
-
-        await onDownloadedRef.current(filePath, next.title);
-        if (!cancelled) {
-          setJobs((prev) =>
-            prev.map((j) =>
-              j.id === next.id ? { ...j, status: "done", percent: 100 } : j
-            )
-          );
-        }
-      } catch (err) {
-        if (!cancelled) {
-          const msg = String(err);
-          const wasCancelled = /cancel/i.test(msg);
-          setJobs((prev) =>
-            prev.map((j) =>
-              j.id === next.id
-                ? {
-                    ...j,
-                    status: wasCancelled ? "cancelled" : "error",
-                    message: wasCancelled ? "Cancelled" : msg,
-                    percent: 0,
-                  }
-                : j
-            )
-          );
-        }
-      } finally {
-        processingRef.current = false;
-        // Process next in queue
-        if (!cancelled) {
-          queueMicrotask(() => pump());
-        }
-      }
-    };
-
-    pump();
-    return () => {
-      cancelled = true;
-    };
-  }, [jobs, setJobs]);
 
   const handleSearch = async (e?: React.FormEvent) => {
     e?.preventDefault();
