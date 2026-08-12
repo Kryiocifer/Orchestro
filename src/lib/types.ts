@@ -26,18 +26,36 @@ export interface LibraryData {
   musicFolder?: string | null;
   /** Where yt-dlp downloads land */
   downloadFolder?: string | null;
+  /** Spotify Web API credentials (local only — do not commit) */
+  spotifyClientId?: string | null;
+  spotifyClientSecret?: string | null;
   lastPlayed?: {
     songId: string;
     position: number;
   };
 }
 
-export type View = "home" | "library" | "playlist" | "youtube";
+export type View = "home" | "library" | "playlist" | "youtube" | "import";
 
 export interface YtSearchResult {
   id: string;
   title: string;
   uploader: string;
   duration: number | null;
+  url: string;
+}
+
+
+export interface SpotifyTrack {
+  title: string;
+  artist: string;
+  duration: number | null;
+  /** Original Spotify track id if known */
+  id?: string;
+}
+
+export interface SpotifyPlaylistResult {
+  name: string;
+  tracks: SpotifyTrack[];
   url: string;
 }

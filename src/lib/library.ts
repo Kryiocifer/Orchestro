@@ -56,7 +56,7 @@ export async function loadLibrary(): Promise<LibraryData> {
   try {
     const path = await getLibraryJsonPath();
     if (!(await exists(path))) {
-      const empty: LibraryData = { songs: [], playlists: [], musicFolder: null, downloadFolder: null };
+      const empty: LibraryData = { songs: [], playlists: [], musicFolder: null, downloadFolder: null, spotifyClientId: null, spotifyClientSecret: null };
       await saveLibrary(empty);
       return empty;
     }
@@ -84,6 +84,8 @@ export async function loadLibrary(): Promise<LibraryData> {
 
     if (data.musicFolder === undefined) data.musicFolder = null;
     if (data.downloadFolder === undefined) data.downloadFolder = null;
+    if (data.spotifyClientId === undefined) data.spotifyClientId = null;
+    if (data.spotifyClientSecret === undefined) data.spotifyClientSecret = null;
 
     // Strip embedded covers — they explode RAM (hundreds of MB) and aren't needed for scan/list
     let stripped = false;
@@ -104,7 +106,7 @@ export async function loadLibrary(): Promise<LibraryData> {
     return data;
   } catch (err) {
     console.error("Failed to load library:", err);
-    return { songs: [], playlists: [], musicFolder: null, downloadFolder: null };
+    return { songs: [], playlists: [], musicFolder: null, downloadFolder: null, spotifyClientId: null, spotifyClientSecret: null };
   }
 }
 
@@ -581,6 +583,43 @@ export async function enrichMissingMetadata(
   return updated;
 }
 
+
+/** Drop library entries whose files no longer exist on disk */
+export async function pruneMissingSongs(): Promise<{
+  library: LibraryData;
+  removed: number;
+}> {
+  const library = await loadLibrary();
+  const kept: Song[] = [];
+  let removed = 0;
+
+  for (const song of library.songs) {
+    try {
+      if (song.path && (await exists(song.path))) {
+        kept.push(song);
+      } else {
+        removed++;
+      }
+    } catch {
+      removed++;
+    }
+  }
+
+  if (removed === 0) {
+    return { library, removed: 0 };
+  }
+
+  const idSet = new Set(kept.map((s) => s.id));
+  library.songs = kept;
+  library.playlists = library.playlists.map((p) => ({
+    ...p,
+    songIds: p.songIds.filter((id) => idSet.has(id)),
+    updatedAt: Date.now(),
+  }));
+  await saveLibrary(library);
+  return { library, removed };
+}
+
 export async function addSongFromPath(
   sourcePath: string,
   fileName: string,
@@ -627,21 +666,31 @@ export async function addSongsBatch(
       continue;
     }
 
-    const destPath = await join(songsDir, file.fileName);
+    // Prefer original path when file already lives in music/download folders
+    // (avoids 2x storage). Only copy into app cache for one-off imports.
     let finalPath = file.sourcePath;
+    const srcLower = file.sourcePath.replace(/\\/g, "/").toLowerCase();
+    const musicRoot = (library.musicFolder || "").replace(/\\/g, "/").toLowerCase();
+    const dlRoot = (library.downloadFolder || "").replace(/\\/g, "/").toLowerCase();
+    const alreadyManaged =
+      (musicRoot && srcLower.startsWith(musicRoot)) ||
+      (dlRoot && srcLower.startsWith(dlRoot));
 
-    try {
-      await copyFile(file.sourcePath, destPath);
-      finalPath = destPath;
-    } catch (err: unknown) {
-      const msg = String((err as Error)?.message || err);
-      if (
-        msg.includes("being used by another process") ||
-        msg.includes("os error 32")
-      ) {
-        console.warn("File locked, using original path:", file.fileName);
-      } else {
-        console.warn("Copy failed, using original path:", err);
+    if (!alreadyManaged) {
+      const destPath = await join(songsDir, file.fileName);
+      try {
+        await copyFile(file.sourcePath, destPath);
+        finalPath = destPath;
+      } catch (err: unknown) {
+        const msg = String((err as Error)?.message || err);
+        if (
+          msg.includes("being used by another process") ||
+          msg.includes("os error 32")
+        ) {
+          console.warn("File locked, using original path:", file.fileName);
+        } else {
+          console.warn("Copy failed, using original path:", err);
+        }
       }
     }
 
@@ -966,4 +1015,16 @@ export async function importM3UPlaylist(
     total: entryPaths.length,
     unmatched,
   };
+}
+
+
+export async function setSpotifyCredentials(
+  clientId: string | null,
+  clientSecret: string | null
+): Promise<LibraryData> {
+  const library = await loadLibrary();
+  library.spotifyClientId = clientId?.trim() || null;
+  library.spotifyClientSecret = clientSecret?.trim() || null;
+  await saveLibrary(library);
+  return library;
 }

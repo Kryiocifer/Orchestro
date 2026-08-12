@@ -10,6 +10,7 @@ import {
   RefreshCw,
   FileAudio,
   Youtube,
+  Link2,
 } from "lucide-react";
 import { Playlist, View } from "../lib/types";
 import { cn } from "../lib/utils";
@@ -81,6 +82,7 @@ export default function Sidebar({
             { id: "home" as View, label: "Home", icon: Home },
             { id: "library" as View, label: "Your Library", icon: Library },
             { id: "youtube" as View, label: "YouTube", icon: Youtube },
+            { id: "import" as View, label: "Import", icon: Link2 },
           ] as const
         ).map(({ id, label, icon: Icon }) => (
           <button
