@@ -17,6 +17,7 @@ interface DownloadPanelProps {
   onClearDone: () => void;
   onClose?: () => void;
   onCancelAll?: () => void;
+  onCancel: (id: string) => void;
 }
 
 function formatEta(seconds: number): string {
