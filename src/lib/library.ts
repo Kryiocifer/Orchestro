@@ -739,13 +739,11 @@ export async function removeSongsBatch(songIds: string[]): Promise<void> {
 
   const toRemove = library.songs.filter((s) => idSet.has(s.id));
 
-  // Best-effort delete only app-copied files (don't touch user's music folder)
+  // Delete the files from the disk
   await Promise.all(
     toRemove.map(async (song) => {
       try {
-        if (song.path.includes("library") && song.path.includes("songs")) {
-          await remove(song.path);
-        }
+        await invoke("delete_file_arbitrary", { path: song.path });
       } catch (err) {
         console.warn("Could not delete file from disk:", err);
       }

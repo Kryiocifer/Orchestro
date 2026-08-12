@@ -1,9 +1,12 @@
 import { useMemo, useState } from "react";
 import { Song, Playlist } from "../lib/types";
-import { Play, Clock, ListMusic, Search, Check } from "lucide-react";
+import { Play, Clock, ListMusic, Search, Check, Download } from "lucide-react";
 import { formatDuration } from "../lib/utils";
 import ContextMenu from "./ContextMenu";
 import { cn } from "../lib/utils";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
+import toast from "react-hot-toast";
 
 interface PlaylistViewProps {
   playlist: Playlist;
@@ -105,6 +108,34 @@ export default function PlaylistView({
     }
   };
 
+  const handleExport = async () => {
+    if (playlistSongs.length === 0) {
+      toast.error("Playlist is empty");
+      return;
+    }
+
+    try {
+      const filePath = await save({
+        filters: [{ name: "Playlist", extensions: ["m3u8"] }],
+        defaultPath: `${playlist.name}.m3u8`,
+      });
+      if (!filePath) return;
+
+      let m3u8 = "#EXTM3U\n";
+      for (const song of playlistSongs) {
+        const durationStr = Math.round(song.duration || 0);
+        m3u8 += `#EXTINF:${durationStr},${song.artist} - ${song.title}\n`;
+        m3u8 += `${song.path}\n`;
+      }
+
+      await writeTextFile(filePath, m3u8);
+      toast.success("Playlist exported successfully");
+    } catch (error) {
+      console.error("Failed to export playlist:", error);
+      toast.error("Failed to export playlist");
+    }
+  };
+
   const handleRowClick = (e: React.MouseEvent, song: Song, index: number) => {
     // Shift → range select from anchor
     if (e.shiftKey) {
@@ -189,8 +220,18 @@ export default function PlaylistView({
             onClick={handlePlayAll}
             disabled={playlistSongs.length === 0}
             className="flex h-14 w-14 items-center justify-center rounded-full bg-spotify-green text-black shadow-lg transition hover:scale-105 hover:bg-spotify-green-hover disabled:cursor-not-allowed disabled:opacity-40"
+            title="Play Playlist"
           >
             <Play className="h-6 w-6 fill-current" />
+          </button>
+
+          <button
+            onClick={handleExport}
+            disabled={playlistSongs.length === 0}
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-white/20 text-spotify-lightgray transition hover:border-white hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            title="Export as .m3u8"
+          >
+            <Download className="h-5 w-5" />
           </button>
 
           <div className="relative">

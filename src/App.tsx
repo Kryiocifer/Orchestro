@@ -1185,6 +1185,15 @@ function App() {
   };
 
   const handleRemoveSong = async (songIds: string[]) => {
+    const { ask } = await import("@tauri-apps/plugin-dialog");
+    const confirmed = await ask(
+      songIds.length > 1
+        ? `Are you sure you want to delete ${songIds.length} songs from your library and your disk? This action cannot be undone.`
+        : "Are you sure you want to delete this song from your library and your disk? This action cannot be undone.",
+      { title: "Delete Song(s)", kind: "warning" }
+    );
+    if (!confirmed) return;
+
     const idSet = new Set(songIds);
     // Optimistic UI update first (feels instant)
     setLibrary((prev) => ({
@@ -1197,6 +1206,10 @@ function App() {
     }));
     if (currentSongRef.current && idSet.has(currentSongRef.current.id)) {
       audioRef.current?.pause();
+      if (audioRef.current) {
+        audioRef.current.removeAttribute('src');
+        audioRef.current.load();
+      }
       setCurrentSong(null);
       setIsPlaying(false);
       setProgress(0);
