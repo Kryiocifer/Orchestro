@@ -1137,6 +1137,7 @@ function App() {
         jobs={downloadJobs}
         open={downloadPanelOpen}
         onToggle={() => setDownloadPanelOpen((o) => !o)}
+        onClose={() => setDownloadPanelOpen(false)}
         onClearDone={() =>
           setDownloadJobs((prev) =>
             prev.filter(

@@ -1,5 +1,6 @@
 import { Download, Loader2, X, Check, AlertCircle } from "lucide-react";
 import { cn } from "../lib/utils";
+import { useEffect, useRef } from "react";
 
 export interface DownloadJob {
   id: string;
@@ -15,6 +16,7 @@ interface DownloadPanelProps {
   onToggle: () => void;
   onClearDone: () => void;
   onCancel: (jobId: string) => void;
+  onClose?: () => void;
 }
 
 export default function DownloadPanel({
@@ -23,7 +25,19 @@ export default function DownloadPanel({
   onToggle,
   onClearDone,
   onCancel,
+  onClose,
 }: DownloadPanelProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (open && panelRef.current && !panelRef.current.contains(event.target as Node)) {
+        onClose?.();
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open, onClose]);
   const active = jobs.filter(
     (j) =>
       j.status === "downloading" ||
@@ -41,7 +55,7 @@ export default function DownloadPanel({
   if (jobs.length === 0) return null;
 
   return (
-    <div className="fixed right-5 top-5 z-[80]">
+    <div className="fixed right-5 top-5 z-[80]" ref={panelRef}>
       <button
         onClick={onToggle}
         className="relative flex h-11 w-11 items-center justify-center rounded-full bg-[#282828] shadow-lg ring-1 ring-white/10 transition hover:bg-[#333]"
