@@ -1,6 +1,6 @@
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 #[cfg(windows)]
@@ -386,7 +386,6 @@ fn yt_download_cancel(job_id: String) -> Result<(), String> {
 
 use sha2::{Digest, Sha256};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use std::io::{Read as IoRead, Write as IoWrite};
 use std::net::TcpListener;
 
 const SPOTIFY_REDIRECT: &str = "http://127.0.0.1:18925/callback";
@@ -551,14 +550,6 @@ enum SpotifyLink {
 
 fn parse_spotify_link(url: &str) -> Option<SpotifyLink> {
     let url = url.trim();
-    let markers = [
-        ("playlist/", "playlist/"),
-        ("album/", "album/"),
-        ("track/", "track/"),
-        ("spotify:playlist:", "spotify:playlist:"),
-        ("spotify:album:", "spotify:album:"),
-        ("spotify:track:", "spotify:track:"),
-    ];
     // Prefer path-style open.spotify.com first
     for (marker, kind) in [
         ("playlist/", "playlist"),
@@ -1028,8 +1019,21 @@ async fn resolve_spotify_playlist_by_id(
     app: AppHandle,
     playlist_id: String,
 ) -> Result<SpotifyPlaylistResult, String> {
-    let url = format!("https://open.spotify.com/playlist/{}", playlist_id);
-    resolve_spotify_playlist(app, url).await
+    // 1) Anonymous web player / embed scraping - works for public playlists without login
+    match resolve_spotify_anonymous("playlist", &playlist_id).await {
+        Ok(r) => Ok(r),
+        Err(anon_err) => {
+            // 2) Official API if user is connected (owned / collab)
+            let url = format!("https://open.spotify.com/playlist/{}", playlist_id);
+            match resolve_spotify_playlist(app, url).await {
+                Ok(r) => Ok(r),
+                Err(api_err) => Err(format!(
+                    "{}\n(API fallback: {})",
+                    anon_err, api_err
+                )),
+            }
+        }
+    }
 }
 
 
@@ -1077,93 +1081,450 @@ async fn spotify_liked_songs(app: AppHandle) -> Result<SpotifyPlaylistResult, St
     })
 }
 
+fn parse_iso8601_duration(s: &str) -> Option<f64> {
+    if !s.starts_with("PT") {
+        return None;
+    }
+    let rest = &s[2..];
+    let mut total_secs = 0.0;
+    let mut num_buf = String::new();
 
+    for c in rest.chars() {
+        if c.is_ascii_digit() || c == '.' {
+            num_buf.push(c);
+        } else {
+            let val = num_buf.parse::<f64>().unwrap_or(0.0);
+            num_buf.clear();
+            match c {
+                'H' => total_secs += val * 3600.0,
+                'M' => total_secs += val * 60.0,
+                'S' => total_secs += val,
+                _ => {}
+            }
+        }
+    }
+    if total_secs > 0.0 {
+        Some(total_secs)
+    } else {
+        None
+    }
+}
 
-/// Public playlist via Spotify embed page (__NEXT_DATA__) — no ownership / Dev Mode gate
-async fn resolve_spotify_playlist_embed(playlist_id: &str) -> Result<SpotifyPlaylistResult, String> {
-    let embed_url = format!("https://open.spotify.com/embed/playlist/{}", playlist_id);
+fn extract_script_by_id(html: &str, id_name: &str) -> Option<String> {
+    let mut search_idx = 0;
+    while let Some(pos) = html[search_idx..].find(id_name) {
+        let actual_pos = search_idx + pos;
+        if let Some(_tag_open) = html[..actual_pos].rfind("<script") {
+            if let Some(tag_close_rel) = html[actual_pos..].find('>') {
+                let content_start = actual_pos + tag_close_rel + 1;
+                if let Some(tag_end_rel) = html[content_start..].find("</script>") {
+                    let content_end = content_start + tag_end_rel;
+                    return Some(html[content_start..content_end].trim().to_string());
+                }
+            }
+        }
+        search_idx = actual_pos + id_name.len();
+    }
+    None
+}
+
+fn extract_ld_json(html: &str) -> Option<String> {
+    let tag = "application/ld+json";
+    let mut search_idx = 0;
+    while let Some(pos) = html[search_idx..].find(tag) {
+        let actual_pos = search_idx + pos;
+        if let Some(_tag_open) = html[..actual_pos].rfind("<script") {
+            if let Some(tag_close_rel) = html[actual_pos..].find('>') {
+                let content_start = actual_pos + tag_close_rel + 1;
+                if let Some(tag_end_rel) = html[content_start..].find("</script>") {
+                    let content_end = content_start + tag_end_rel;
+                    return Some(html[content_start..content_end].trim().to_string());
+                }
+            }
+        }
+        search_idx = actual_pos + tag.len();
+    }
+    None
+}
+
+fn parse_track_from_json_item(item: &serde_json::Value) -> Option<SpotifyTrack> {
+    let obj = item.get("track").unwrap_or(item);
+
+    let title = obj
+        .get("name")
+        .or_else(|| obj.get("title"))
+        .or_else(|| obj.get("trackTitle"))
+        .and_then(|v| v.as_str())?
+        .trim();
+
+    if title.is_empty() {
+        return None;
+    }
+
+    let mut artist = obj
+        .get("subtitle")
+        .or_else(|| obj.get("artist"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    if artist.is_empty() {
+        if let Some(artists_arr) = obj.get("artists").and_then(|v| v.as_array()) {
+            let names: Vec<&str> = artists_arr
+                .iter()
+                .filter_map(|a| a.get("name").and_then(|n| n.as_str()).or_else(|| a.as_str()))
+                .filter(|s| !s.trim().is_empty())
+                .collect();
+            if !names.is_empty() {
+                artist = names.join(", ");
+            }
+        }
+    }
+
+    if artist.is_empty() {
+        if let Some(by_artist) = obj.get("byArtist") {
+            if let Some(arr) = by_artist.as_array() {
+                let names: Vec<&str> = arr
+                    .iter()
+                    .filter_map(|a| a.get("name").and_then(|n| n.as_str()))
+                    .collect();
+                if !names.is_empty() {
+                    artist = names.join(", ");
+                }
+            } else if let Some(n) = by_artist.get("name").and_then(|n| n.as_str()) {
+                artist = n.to_string();
+            }
+        }
+    }
+
+    if artist.is_empty() {
+        artist = "Unknown Artist".to_string();
+    }
+
+    let duration = obj
+        .get("duration")
+        .or_else(|| obj.get("duration_ms"))
+        .or_else(|| obj.pointer("/duration_ms"))
+        .and_then(|v| v.as_f64().or_else(|| v.as_u64().map(|u| u as f64)))
+        .map(|d| if d > 1000.0 { d / 1000.0 } else { d })
+        .or_else(|| {
+            obj.get("duration")
+                .and_then(|v| v.as_str())
+                .and_then(parse_iso8601_duration)
+        });
+
+    let mut id = obj.get("id").and_then(|v| v.as_str()).map(|s| s.to_string());
+    if id.is_none() {
+        if let Some(uri) = obj.get("uri").and_then(|v| v.as_str()) {
+            if let Some(stripped) = uri.strip_prefix("spotify:track:") {
+                id = Some(stripped.to_string());
+            }
+        } else if let Some(url) = obj.get("url").and_then(|v| v.as_str()) {
+            if let Some(last) = url.rsplit('/').next() {
+                id = Some(last.split('?').next().unwrap_or(last).to_string());
+            }
+        }
+    }
+
+    Some(SpotifyTrack {
+        title: title.to_string(),
+        artist,
+        duration,
+        id,
+    })
+}
+
+fn find_track_array_recursive<'a>(val: &'a serde_json::Value) -> Option<&'a Vec<serde_json::Value>> {
+    match val {
+        serde_json::Value::Object(map) => {
+            if let Some(serde_json::Value::Array(arr)) = map.get("trackList") {
+                if !arr.is_empty() {
+                    return Some(arr);
+                }
+            }
+            if let Some(serde_json::Value::Array(arr)) = map.get("tracks") {
+                if !arr.is_empty() && arr.iter().any(|item| item.is_object()) {
+                    return Some(arr);
+                }
+            }
+            if let Some(serde_json::Value::Array(arr)) = map.get("items") {
+                if !arr.is_empty() && arr.iter().any(|item| item.get("track").is_some() || item.get("name").is_some()) {
+                    return Some(arr);
+                }
+            }
+            for (_k, v) in map {
+                if let Some(found) = find_track_array_recursive(v) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr {
+                if let Some(found) = find_track_array_recursive(v) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn extract_tracks_from_embed_json(val: &serde_json::Value) -> (Option<String>, Vec<SpotifyTrack>) {
+    let mut name = None;
+    let mut tracks = Vec::new();
+
+    if let Some(n) = val
+        .pointer("/props/pageProps/state/data/entity/name")
+        .or_else(|| val.pointer("/props/pageProps/state/data/entity/title"))
+        .or_else(|| val.pointer("/props/pageProps/entity/name"))
+        .or_else(|| val.pointer("/props/pageProps/entity/title"))
+        .or_else(|| val.pointer("/props/pageProps/resolvedEntityData/name"))
+        .or_else(|| val.pointer("/props/pageProps/resolvedEntityData/title"))
+        .or_else(|| val.pointer("/props/pageProps/title"))
+        .and_then(|v| v.as_str())
+    {
+        name = Some(n.to_string());
+    }
+
+    let list_opt = val
+        .pointer("/props/pageProps/state/data/entity/trackList")
+        .or_else(|| val.pointer("/props/pageProps/state/data/trackList"))
+        .or_else(|| val.pointer("/props/pageProps/resolvedEntityData/trackList"))
+        .or_else(|| val.pointer("/props/pageProps/trackList"))
+        .or_else(|| val.pointer("/props/pageProps/entity/trackList"))
+        .or_else(|| val.pointer("/props/pageProps/initialPlaylist/tracks/items"))
+        .and_then(|v| v.as_array());
+
+    if let Some(items) = list_opt {
+        for item in items {
+            if let Some(track) = parse_track_from_json_item(item) {
+                tracks.push(track);
+            }
+        }
+    }
+
+    if tracks.is_empty() {
+        if let Some(items) = find_track_array_recursive(val) {
+            for item in items {
+                if let Some(track) = parse_track_from_json_item(item) {
+                    tracks.push(track);
+                }
+            }
+        }
+    }
+
+    if tracks.is_empty() {
+        if let Some(track) = parse_track_from_json_item(val) {
+            if name.is_none() {
+                name = Some(track.title.clone());
+            }
+            tracks.push(track);
+        }
+    }
+
+    (name, tracks)
+}
+
+fn extract_tracks_from_json_ld(val: &serde_json::Value) -> (Option<String>, Vec<SpotifyTrack>) {
+    let mut name = None;
+    let mut tracks = Vec::new();
+
+    if let Some(n) = val.get("name").and_then(|v| v.as_str()) {
+        name = Some(n.to_string());
+    }
+
+    if let Some(items) = val.get("track").and_then(|v| v.as_array()) {
+        for item in items {
+            if let Some(track) = parse_track_from_json_item(item) {
+                tracks.push(track);
+            }
+        }
+    } else if let Some(track) = parse_track_from_json_item(val) {
+        if name.is_none() {
+            name = Some(track.title.clone());
+        }
+        tracks.push(track);
+    }
+
+    (name, tracks)
+}
+
+async fn resolve_spotify_anonymous_token_fallback(
+    entity_type: &str,
+    id: &str,
+) -> Result<SpotifyPlaylistResult, String> {
     let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
         .build()
         .map_err(|e| e.to_string())?;
 
-    let html = client
-        .get(&embed_url)
+    let token_res = client
+        .get("https://open.spotify.com/get_access_token?reason=transport&productType=web_player")
         .send()
         .await
-        .map_err(|e| format!("Embed fetch failed: {}", e))?
-        .text()
+        .map_err(|e| format!("Token fetch failed: {}", e))?;
+
+    if !token_res.status().is_success() {
+        return Err(format!("Token endpoint returned status {}", token_res.status()));
+    }
+
+    let token_json: serde_json::Value = token_res
+        .json()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("Bad token JSON: {}", e))?;
 
-    // __NEXT_DATA__ JSON
-    let start_tag = "<script id=\"__NEXT_DATA__\" type=\"application/json\">";
-    let start = html
-        .find(start_tag)
-        .ok_or_else(|| "Playlist embed has no track data (private or blocked)".to_string())?;
-    let after = &html[start + start_tag.len()..];
-    let end = after
-        .find("</script>")
-        .ok_or_else(|| "Malformed embed JSON".to_string())?;
-    let json_str = &after[..end];
+    let access_token = token_json
+        .get("accessToken")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "No anonymous access token found".to_string())?;
 
-    let data: serde_json::Value =
-        serde_json::from_str(json_str).map_err(|e| format!("Bad embed JSON: {}", e))?;
+    let endpoint = if entity_type == "album" { "albums" } else { "playlists" };
+    let api_url = format!("https://api.spotify.com/v1/{}/{}", endpoint, id);
 
-    let entity = data
-        .pointer("/props/pageProps/state/data/entity")
-        .cloned()
-        .ok_or_else(|| "Embed missing playlist entity".to_string())?;
+    let res = client
+        .get(&api_url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|e| format!("API request failed: {}", e))?;
 
-    let playlist_name = entity
+    if !res.status().is_success() {
+        return Err(format!("API returned status {}", res.status()));
+    }
+
+    let json: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|e| format!("Bad API JSON: {}", e))?;
+
+    let name = json
         .get("name")
         .and_then(|v| v.as_str())
         .unwrap_or("Spotify Playlist")
         .to_string();
 
     let mut tracks = Vec::new();
-    if let Some(list) = entity.get("trackList").and_then(|v| v.as_array()) {
-        for t in list {
-            let title = t
-                .get("title")
-                .or_else(|| t.get("name"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            if title.is_empty() {
-                continue;
+    let items_opt = json
+        .pointer("/tracks/items")
+        .or_else(|| json.pointer("/items"))
+        .and_then(|v| v.as_array());
+
+    if let Some(items) = items_opt {
+        for item in items {
+            if let Some(t) = parse_track_from_json_item(item) {
+                tracks.push(t);
             }
-            let artist = t
-                .get("subtitle")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Unknown Artist")
-                // embed uses special spaces sometimes
-                .replace('\u{00a0}', " ")
-                .trim()
-                .to_string();
-            let id = t
-                .get("uri")
-                .and_then(|v| v.as_str())
-                .and_then(|uri| uri.strip_prefix("spotify:track:"))
-                .map(|s| s.to_string());
-            tracks.push(SpotifyTrack {
-                title,
-                artist,
-                duration: None,
-                id,
-            });
         }
     }
 
     if tracks.is_empty() {
-        return Err("Embed returned no tracks (playlist may be private/empty)".into());
+        return Err("No tracks returned from API".into());
     }
 
     Ok(SpotifyPlaylistResult {
-        name: playlist_name,
+        name,
         tracks,
-        url: format!("https://open.spotify.com/playlist/{}", playlist_id),
+        url: format!("https://open.spotify.com/{}/{}", entity_type, id),
     })
+}
+
+/// Public playlist/album/track scraper via Embed & HTML data
+async fn resolve_spotify_anonymous(
+    entity_type: &str,
+    id: &str,
+) -> Result<SpotifyPlaylistResult, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // 1. Try Spotify Embed page (https://open.spotify.com/embed/{entity_type}/{id})
+    let embed_url = format!("https://open.spotify.com/embed/{}/{}", entity_type, id);
+    if let Ok(resp) = client
+        .get(&embed_url)
+        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        .header("Accept-Language", "en-US,en;q=0.5")
+        .send()
+        .await
+    {
+        if resp.status().is_success() {
+            if let Ok(html) = resp.text().await {
+                if let Some(json_str) = extract_script_by_id(&html, "__NEXT_DATA__") {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                        let (name_opt, tracks) = extract_tracks_from_embed_json(&val);
+                        if !tracks.is_empty() {
+                            let name = name_opt.unwrap_or_else(|| {
+                                format!("Spotify {}", if entity_type == "album" { "Album" } else { "Playlist" })
+                            });
+                            return Ok(SpotifyPlaylistResult {
+                                name,
+                                tracks,
+                                url: format!("https://open.spotify.com/{}/{}", entity_type, id),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Try Direct public page (https://open.spotify.com/{entity_type}/{id})
+    let page_url = format!("https://open.spotify.com/{}/{}", entity_type, id);
+    if let Ok(resp) = client
+        .get(&page_url)
+        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        .header("Accept-Language", "en-US,en;q=0.5")
+        .send()
+        .await
+    {
+        if resp.status().is_success() {
+            if let Ok(html) = resp.text().await {
+                if let Some(json_str) = extract_ld_json(&html) {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                        let (name_opt, tracks) = extract_tracks_from_json_ld(&val);
+                        if !tracks.is_empty() {
+                            let name = name_opt.unwrap_or_else(|| {
+                                format!("Spotify {}", if entity_type == "album" { "Album" } else { "Playlist" })
+                            });
+                            return Ok(SpotifyPlaylistResult {
+                                name,
+                                tracks,
+                                url: page_url.clone(),
+                            });
+                        }
+                    }
+                }
+                if let Some(json_str) = extract_script_by_id(&html, "__NEXT_DATA__") {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                        let (name_opt, tracks) = extract_tracks_from_embed_json(&val);
+                        if !tracks.is_empty() {
+                            let name = name_opt.unwrap_or_else(|| {
+                                format!("Spotify {}", if entity_type == "album" { "Album" } else { "Playlist" })
+                            });
+                            return Ok(SpotifyPlaylistResult {
+                                name,
+                                tracks,
+                                url: format!("https://open.spotify.com/{}/{}", entity_type, id),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Try legacy anonymous token API fallback
+    if let Ok(res) = resolve_spotify_anonymous_token_fallback(entity_type, id).await {
+        return Ok(res);
+    }
+
+    Err(format!(
+        "Could not load {} '{}'. If this is a private playlist, please click 'Connect Spotify'.",
+        entity_type, id
+    ))
 }
 
 #[tauri::command]
@@ -1171,6 +1532,14 @@ async fn resolve_spotify_album(
     app: AppHandle,
     album_id: String,
 ) -> Result<SpotifyPlaylistResult, String> {
+    // 1) Try scraping first (works for all public albums without auth)
+    if let Ok(r) = resolve_spotify_anonymous("album", &album_id).await {
+        if !r.tracks.is_empty() {
+            return Ok(r);
+        }
+    }
+
+    // 2) Fallback to official API if user has connected Spotify
     let token = valid_spotify_token(&app).await?;
     let client = reqwest::Client::new();
 
@@ -1271,26 +1640,28 @@ async fn resolve_spotify_link(
     match parse_spotify_link(&url) {
         Some(SpotifyLink::Album(id)) => resolve_spotify_album(app, id).await,
         Some(SpotifyLink::Playlist(id)) => {
-            // 1) Public embed — works without ownership / often without login
-            match resolve_spotify_playlist_embed(&id).await {
+            // 1) Scraping works for all public playlists without login
+            match resolve_spotify_anonymous("playlist", &id).await {
                 Ok(r) => Ok(r),
-                Err(embed_err) => {
-                    // 2) Official API if user is connected (owned / collab)
+                Err(anon_err) => {
+                    // 2) Official API fallback if user is connected (owned / collab)
                     match resolve_spotify_playlist(app, url.clone()).await {
                         Ok(r) => Ok(r),
                         Err(api_err) => Err(format!(
-                            "{}
-(API fallback: {})",
-                            embed_err, api_err
+                            "{}\n(API fallback: {})",
+                            anon_err, api_err
                         )),
                     }
                 }
             }
         }
-        Some(SpotifyLink::Track(_)) => Err(
-            "Single track links aren't supported yet — paste an album or playlist link.".into(),
-        ),
-        None => Err("Couldn't recognize that as a Spotify playlist or album link.".into()),
+        Some(SpotifyLink::Track(id)) => {
+            match resolve_spotify_anonymous("track", &id).await {
+                Ok(r) => Ok(r),
+                Err(e) => Err(format!("Could not load track: {}", e)),
+            }
+        }
+        None => Err("Couldn't recognize that as a Spotify playlist, album, or track link.".into()),
     }
 }
 

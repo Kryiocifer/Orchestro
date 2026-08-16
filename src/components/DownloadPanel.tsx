@@ -15,8 +15,9 @@ interface DownloadPanelProps {
   open: boolean;
   onToggle: () => void;
   onClearDone: () => void;
-  onCancel: (jobId: string) => void;
+  onClose?: () => void;
   onCancelAll?: () => void;
+  onCancel: (id: string) => void;
 }
 
 function formatEta(seconds: number): string {
@@ -36,8 +37,20 @@ export default function DownloadPanel({
   onToggle,
   onClearDone,
   onCancel,
+  onClose,
   onCancelAll,
 }: DownloadPanelProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (open && panelRef.current && !panelRef.current.contains(event.target as Node)) {
+        onClose?.();
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open, onClose]);
   const active = jobs.filter(
     (j) =>
       j.status === "downloading" ||
@@ -106,7 +119,7 @@ export default function DownloadPanel({
   if (jobs.length === 0) return null;
 
   return (
-    <div className="fixed right-5 top-5 z-[80]">
+    <div className="fixed right-5 top-5 z-[80]" ref={panelRef}>
       <button
         onClick={onToggle}
         className="relative flex h-11 w-11 items-center justify-center rounded-full bg-[#282828]/80 shadow-lg ring-1 ring-white/10 backdrop-blur transition hover:bg-[#333]"

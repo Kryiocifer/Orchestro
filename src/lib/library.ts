@@ -7,7 +7,6 @@ import {
   mkdir,
   copyFile,
   readFile,
-  remove,
   readDir,
 } from "@tauri-apps/plugin-fs";
 import { v4 as uuidv4 } from "uuid";

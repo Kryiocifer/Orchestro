@@ -23,7 +23,6 @@ interface ImportViewProps {
   onPickDownloadFolder: () => void;
   jobs: DownloadJob[];
   setJobs: React.Dispatch<React.SetStateAction<DownloadJob[]>>;
-  /** Optional: only needed for first Connect (PKCE needs Client ID, no secret) */
   spotifyClientId?: string | null;
   onSaveSpotifyClientId?: (id: string) => Promise<void>;
 }
@@ -46,7 +45,7 @@ export default function ImportView({
   spotifyClientId,
   onSaveSpotifyClientId,
 }: ImportViewProps) {
-  const [mode, setMode] = useState<Mode>("my");
+  const [mode, setMode] = useState<Mode>("url");
   const [url, setUrl] = useState("");
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -109,7 +108,7 @@ export default function ImportView({
     if (!id) {
       setShowClientId(true);
       setError(
-        "Paste your Spotify Client ID once (developer.spotify.com). No secret needed. Add redirect: http://127.0.0.1:18925/callback"
+        "Paste your Spotify Client ID (developer.spotify.com). No secret needed. Redirect URI: http://127.0.0.1:18925/callback"
       );
       return;
     }
@@ -142,6 +141,7 @@ export default function ImportView({
   };
 
   const handleResolveUrl = async () => {
+    if (!url.trim()) return;
     setLoading(true);
     setError(null);
     setResult(null);
@@ -160,15 +160,7 @@ export default function ImportView({
     }
   };
 
-  const handleOpenPlaylist = async (id: string, owned?: boolean) => {
-    if (owned === false) {
-      toast.error(
-        "Spotify blocks tracks on playlists you don't own. Quick fix: in Spotify select all → Add to playlist → New playlist, then import that copy — or use Text list / an album link",
-        { duration: 5000 }
-      );
-      setMode("text");
-      return;
-    }
+  const handleOpenPlaylist = async (id: string, _owned?: boolean) => {
     setLoading(true);
     setError(null);
     setResult(null);
@@ -206,6 +198,7 @@ export default function ImportView({
   };
 
   const handleParseText = async () => {
+    if (!text.trim()) return;
     setLoading(true);
     setError(null);
     setResult(null);
@@ -263,178 +256,118 @@ export default function ImportView({
     ? downloadFolder.split(/[/\\]/).filter(Boolean).pop()
     : null;
 
+  const modes: { key: Mode; label: string }[] = [
+    { key: "url", label: "Paste link" },
+    { key: "my", label: "My playlists" },
+    { key: "text", label: "Text list" },
+  ];
+
   return (
     <div className="flex h-full flex-col p-8">
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-bold">Import</h1>
-          <p className="mt-1 text-sm text-spotify-lightgray">
-            Connect Spotify → pick a playlist or paste a link → download via
-            YouTube
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onPickDownloadFolder}
-            className="flex items-center gap-2 rounded-full bg-white/10 px-4 py-1.5 text-sm hover:bg-white/20"
-          >
-            <FolderOpen className="h-4 w-4" />
-            {folderLabel || "Download folder"}
-          </button>
-          {connected ? (
-            <button
-              onClick={handleDisconnect}
-              className="flex items-center gap-2 rounded-full bg-white/10 px-4 py-1.5 text-sm hover:bg-white/20"
-            >
-              <LogOut className="h-4 w-4" />
-              Disconnect
-            </button>
-          ) : (
-            <button
-              onClick={handleConnect}
-              disabled={connecting}
-              className="flex items-center gap-2 rounded-full bg-spotify-green px-4 py-1.5 text-sm font-semibold text-black hover:bg-spotify-green-hover disabled:opacity-50"
-            >
-              {connecting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <LogIn className="h-4 w-4" />
-              )}
-              Connect Spotify
-            </button>
-          )}
-        </div>
+      {/* Header — matches YouTubeView / LibraryView style */}
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold">Import</h1>
+        <p className="mt-1 text-sm text-spotify-lightgray">
+          Paste a public Spotify link, browse your library, or type song names
+        </p>
       </div>
 
+      {/* Top bar: folder + spotify connection */}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <button
+          onClick={onPickDownloadFolder}
+          className="flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm transition hover:bg-white/20"
+        >
+          <FolderOpen className="h-4 w-4" />
+          {folderLabel ? (
+            <span className="max-w-[200px] truncate">{folderLabel}</span>
+          ) : (
+            "Choose download folder"
+          )}
+        </button>
+
+        {connected ? (
+          <button
+            onClick={handleDisconnect}
+            className="flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm transition hover:bg-white/20"
+          >
+            <LogOut className="h-4 w-4" />
+            Disconnect
+          </button>
+        ) : (
+          <button
+            onClick={handleConnect}
+            disabled={connecting}
+            className="flex items-center gap-2 rounded-full bg-spotify-green px-4 py-2 text-sm font-semibold text-black transition hover:bg-spotify-green-hover disabled:opacity-50"
+          >
+            {connecting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <LogIn className="h-4 w-4" />
+            )}
+            Connect Spotify
+          </button>
+        )}
+      </div>
+
+      {/* Client ID setup (only shown when needed) */}
       {(showClientId || (!connected && !spotifyClientId)) && (
-        <div className="mb-4 space-y-2 rounded-xl border border-white/10 bg-white/5 p-4">
-          <p className="text-sm font-medium">Spotify Client ID (once)</p>
-          <p className="text-xs text-spotify-lightgray">
-            Create an app at developer.spotify.com → add redirect URI{" "}
+        <div className="mb-4 rounded-lg border border-white/10 bg-white/5 p-4">
+          <p className="mb-1 text-sm font-medium">Spotify Client ID</p>
+          <p className="mb-3 text-xs text-spotify-lightgray">
+            Create an app at developer.spotify.com → add redirect{" "}
             <code className="text-white">http://127.0.0.1:18925/callback</code>{" "}
-            → paste Client ID only (no secret).
+            → paste Client ID. Only needed for private playlists & liked songs.
           </p>
-          <input
-            value={clientIdDraft}
-            onChange={(e) => setClientIdDraft(e.target.value)}
-            placeholder="Client ID"
-            className="w-full rounded-lg bg-black/40 px-3 py-2 text-sm outline-none ring-1 ring-white/10 focus:ring-spotify-green"
-          />
+          <div className="flex gap-2">
+            <input
+              value={clientIdDraft}
+              onChange={(e) => setClientIdDraft(e.target.value)}
+              placeholder="Client ID"
+              className="flex-1 rounded-lg bg-black/40 px-3 py-2 text-sm outline-none ring-1 ring-white/10 focus:ring-spotify-green"
+            />
+            <button
+              onClick={handleConnect}
+              disabled={connecting || !clientIdDraft.trim()}
+              className="rounded-lg bg-spotify-green px-4 py-2 text-sm font-semibold text-black hover:bg-spotify-green-hover disabled:opacity-40"
+            >
+              Save
+            </button>
+          </div>
         </div>
       )}
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        <button
-          onClick={() => setMode("my")}
-          className={cn(
-            "rounded-full px-4 py-1.5 text-sm font-medium transition",
-            mode === "my"
-              ? "bg-spotify-green text-black"
-              : "bg-white/10 text-white hover:bg-white/15"
-          )}
-        >
-          My playlists
-        </button>
-        <button
-          onClick={() => setMode("url")}
-          className={cn(
-            "rounded-full px-4 py-1.5 text-sm font-medium transition",
-            mode === "url"
-              ? "bg-spotify-green text-black"
-              : "bg-white/10 text-white hover:bg-white/15"
-          )}
-        >
-          Paste link
-        </button>
-        <button
-          onClick={() => setMode("text")}
-          className={cn(
-            "rounded-full px-4 py-1.5 text-sm font-medium transition",
-            mode === "text"
-              ? "bg-spotify-green text-black"
-              : "bg-white/10 text-white hover:bg-white/15"
-          )}
-        >
-          Text list
-        </button>
+      {/* Mode tabs */}
+      <div className="mb-4 flex gap-2">
+        {modes.map((m) => (
+          <button
+            key={m.key}
+            onClick={() => setMode(m.key)}
+            className={cn(
+              "rounded-full px-4 py-1.5 text-sm font-medium transition",
+              mode === m.key
+                ? "bg-white text-black"
+                : "bg-white/10 text-white hover:bg-white/15"
+            )}
+          >
+            {m.label}
+          </button>
+        ))}
       </div>
 
+      {/* Error */}
       {error && (
         <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{error}</span>
+          <span className="flex-1">{error}</span>
+          <button onClick={() => setError(null)} className="text-amber-300 hover:text-white">
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
 
-      {mode === "my" && (
-        <div className="mb-4 min-h-0 flex-1 overflow-y-auto">
-          {!connected ? (
-            <div className="flex flex-col items-center justify-center py-16 text-spotify-lightgray">
-              <ListMusic className="mb-3 h-12 w-12 opacity-40" />
-              <p>Connect Spotify to see your playlists</p>
-            </div>
-          ) : loadingPlaylists ? (
-            <div className="flex justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-spotify-green" />
-            </div>
-          ) : (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              <button
-                onClick={handleLikedSongs}
-                disabled={loading}
-                className="flex items-center gap-3 rounded-xl bg-gradient-to-br from-purple-700/40 to-blue-700/30 p-3 text-left transition hover:from-purple-700/55 hover:to-blue-700/45"
-              >
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-gradient-to-br from-purple-500 to-blue-500">
-                  <ListMusic className="h-5 w-5 text-white" />
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold">Liked Songs</p>
-                  <p className="text-xs text-spotify-lightgray">
-                    Your library · always works
-                  </p>
-                </div>
-              </button>
-              {playlists.map((p) => {
-                const locked = p.owned === false;
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => handleOpenPlaylist(p.id, p.owned)}
-                    disabled={loading}
-                    className={cn(
-                      "flex items-center gap-3 rounded-xl p-3 text-left transition",
-                      locked
-                        ? "bg-white/[0.03] opacity-70 hover:bg-white/10"
-                        : "bg-white/5 hover:bg-white/10"
-                    )}
-                  >
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded bg-white/10">
-                      {p.image ? (
-                        <img
-                          src={p.image}
-                          alt=""
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <ListMusic className="h-5 w-5 text-spotify-lightgray" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold">{p.name}</p>
-                      <p className="text-xs text-spotify-lightgray">
-                        {p.tracks_total} tracks
-                        {locked ? " · not owned — duplicate in Spotify" : p.owned ? " · yours" : ""}
-                      </p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {mode === "url" && (
+      {/* URL mode */}
+      {mode === "url" && !result && (
         <div className="mb-4 flex gap-2">
           <div className="relative flex-1">
             <Link2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-spotify-lightgray" />
@@ -456,7 +389,8 @@ export default function ImportView({
         </div>
       )}
 
-      {mode === "text" && (
+      {/* Text mode */}
+      {mode === "text" && !result && (
         <div className="mb-4 space-y-2">
           <textarea
             value={text}
@@ -479,8 +413,79 @@ export default function ImportView({
         </div>
       )}
 
+      {/* My playlists mode */}
+      {mode === "my" && !result && (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {!connected ? (
+            <div className="flex flex-col items-center justify-center py-16 text-spotify-lightgray">
+              <ListMusic className="mb-3 h-12 w-12 opacity-40" />
+              <p>Connect Spotify to see your playlists</p>
+            </div>
+          ) : loadingPlaylists ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-spotify-green" />
+            </div>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {/* Liked Songs */}
+              <button
+                onClick={handleLikedSongs}
+                disabled={loading}
+                className="flex items-center gap-3 rounded-lg bg-gradient-to-br from-purple-700/40 to-blue-700/30 p-3 text-left transition hover:from-purple-700/55 hover:to-blue-700/45"
+              >
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-gradient-to-br from-purple-500 to-blue-500">
+                  <ListMusic className="h-5 w-5 text-white" />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold">Liked Songs</p>
+                  <p className="text-xs text-spotify-lightgray">Your saved tracks</p>
+                </div>
+              </button>
+
+              {/* Playlists */}
+              {playlists.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => handleOpenPlaylist(p.id, p.owned)}
+                  disabled={loading}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg p-3 text-left transition",
+                    p.owned === false
+                      ? "bg-white/[0.03] opacity-70 hover:bg-white/10"
+                      : "bg-white/5 hover:bg-white/10"
+                  )}
+                >
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded bg-white/10">
+                    {p.image ? (
+                      <img src={p.image} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <ListMusic className="h-5 w-5 text-spotify-lightgray" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">{p.name}</p>
+                    <p className="text-xs text-spotify-lightgray">
+                      {p.tracks_total} tracks{p.owned ? " · yours" : ""}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Loading indicator */}
+      {loading && !result && (
+        <div className="flex flex-1 items-center justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-spotify-green" />
+        </div>
+      )}
+
+      {/* Results panel */}
       {result && (
         <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-white/10 bg-white/5">
+          {/* Result header */}
           <div className="flex flex-wrap items-center gap-3 border-b border-white/10 px-4 py-3">
             <div className="min-w-0 flex-1">
               <p className="truncate font-semibold">{result.name}</p>
@@ -488,8 +493,8 @@ export default function ImportView({
                 {result.tracks.length} tracks · {selected.size} selected
               </p>
             </div>
+
             <button
-              type="button"
               onClick={() => {
                 setResult(null);
                 setSelected(new Set());
@@ -500,6 +505,7 @@ export default function ImportView({
             >
               <X className="h-4 w-4" />
             </button>
+
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-spotify-lightgray" />
               <input
@@ -509,6 +515,7 @@ export default function ImportView({
                 className="w-40 rounded-full bg-white/10 py-1.5 pl-8 pr-3 text-xs outline-none"
               />
             </div>
+
             <button
               onClick={() => setSelected(new Set(result.tracks.map((_, i) => i)))}
               className="text-xs text-spotify-lightgray hover:text-white"
@@ -521,6 +528,7 @@ export default function ImportView({
             >
               None
             </button>
+
             <button
               onClick={handleDownload}
               disabled={selected.size === 0 || !downloadFolder}
@@ -530,6 +538,8 @@ export default function ImportView({
               Download {selected.size || ""}
             </button>
           </div>
+
+          {/* Track list */}
           <div className="min-h-0 flex-1 overflow-y-auto">
             {filteredTracks.map(({ t, i }) => {
               const isSel = selected.has(i);
@@ -554,9 +564,7 @@ export default function ImportView({
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">{t.title}</p>
-                    <p className="truncate text-xs text-spotify-lightgray">
-                      {t.artist}
-                    </p>
+                    <p className="truncate text-xs text-spotify-lightgray">{t.artist}</p>
                   </div>
                   <span className="text-xs text-spotify-lightgray">
                     {t.duration ? formatDuration(t.duration) : ""}
