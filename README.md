@@ -37,6 +37,34 @@ npm run tauri dev
 npm run tauri build
 ```
 
+### Linux Installation & Building (Arch / CachyOS)
+
+When building or running Orchestro on Linux, you need specific system libraries for the WebKit interface and audio playback (GStreamer). 
+
+**1. Install required dependencies:**
+```bash
+# Arch / CachyOS
+sudo pacman -S --needed \
+  webkit2gtk-4.1 \
+  base-devel \
+  curl wget openssl \
+  appmenu-gtk-module gtk3 \
+  libappindicator-gtk3 librsvg libvips \
+  gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav \
+  fuse2
+```
+
+**2. Build the App:**
+To properly build the `.AppImage` (and avoid `linuxdeploy` failing or stripping essential libraries), use:
+```bash
+NO_STRIP=1 APPIMAGE_EXTRACT_AND_RUN=1 npm run tauri build
+```
+
+Your compiled files will be located at:
+- **Native Binary:** `src-tauri/target/release/orchestro` (Recommended for native Arch usage)
+- **AppImage:** `src-tauri/target/release/bundle/appimage/Orchestro_0.1.0_amd64.AppImage`
+- **Debian:** `src-tauri/target/release/bundle/deb/Orchestro_0.1.0_amd64.deb`
+
 ---
 
 ## How to use
