@@ -54,14 +54,35 @@ sudo pacman -S --needed \
   fuse2
 ```
 
-**2. Build the App:**
-To properly build the `.AppImage` (and avoid `linuxdeploy` failing or stripping essential libraries), use:
+**2. Installing from a Release Download:**
+If you downloaded a pre-compiled binary or AppImage from the releases page, you can run it from **any folder** (Downloads, Desktop, etc.). It does not need to be in a specific system folder.
+
+For the **Native Binary** (Recommended for Arch):
+```bash
+# Make it executable
+chmod +x orchestro
+# Run it
+./orchestro
+```
+*(Optional: You can move it to `~/.local/bin/` so you can launch it by just typing `orchestro` anywhere in your terminal, but it works fine from any location).*
+
+For the **AppImage**:
+```bash
+# Make it executable
+chmod +x Orchestro_0.1.0_amd64.AppImage
+# Run it
+./Orchestro_0.1.0_amd64.AppImage
+```
+> **Troubleshooting AppImages:** If the AppImage opens but audio crashes, WebKitGTK might be isolated from your system's GStreamer plugins. You can force it to see them by launching it like this: `GST_PLUGIN_SYSTEM_PATH_1_0=/usr/lib/gstreamer-1.0 ./Orchestro_0.1.0_amd64.AppImage`
+
+**3. Build the App from Source:**
+To properly build the `.AppImage` yourself (and avoid `linuxdeploy` failing or stripping essential libraries), use:
 ```bash
 NO_STRIP=1 APPIMAGE_EXTRACT_AND_RUN=1 npm run tauri build
 ```
 
 Your compiled files will be located at:
-- **Native Binary:** `src-tauri/target/release/orchestro` (Recommended for native Arch usage)
+- **Native Binary:** `src-tauri/target/release/orchestro` 
 - **AppImage:** `src-tauri/target/release/bundle/appimage/Orchestro_0.1.0_amd64.AppImage`
 - **Debian:** `src-tauri/target/release/bundle/deb/Orchestro_0.1.0_amd64.deb`
 
