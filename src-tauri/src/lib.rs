@@ -349,6 +349,34 @@ fn read_file_head(path: String, max_bytes: usize) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
+/// Read an audio file and return it as a base64 data URL — the most reliable way
+/// to play local audio in WebKitGTK on Linux (avoids blob: URL GLib-GObject crashes).
+#[tauri::command]
+fn read_audio_base64(path: String) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    let data = std::fs::read(&path).map_err(|e| format!("Cannot read file: {}", e))?;
+
+    let mime = match Path::new(&path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .as_deref()
+    {
+        Some("mp3") => "audio/mpeg",
+        Some("flac") => "audio/flac",
+        Some("ogg") => "audio/ogg",
+        Some("opus") => "audio/ogg; codecs=opus",
+        Some("m4a") | Some("aac") => "audio/mp4",
+        Some("wav") => "audio/wav",
+        Some("webm") => "audio/webm",
+        _ => "audio/mpeg",
+    };
+
+    let b64 = STANDARD.encode(&data);
+    Ok(format!("data:{};base64,{}", mime, b64))
+}
+
 #[tauri::command]
 fn delete_file_arbitrary(path: String) -> Result<(), String> {
     std::fs::remove_file(&path).map_err(|e| e.to_string())
@@ -2026,6 +2054,7 @@ pub fn run() {
             yt_download,
             yt_download_cancel,
             read_file_head,
+            read_audio_base64,
             delete_file_arbitrary,
             yt_dlp_status,
             yt_dlp_update,

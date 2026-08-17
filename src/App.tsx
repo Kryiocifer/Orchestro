@@ -188,7 +188,9 @@ function App() {
     };
 
     const onError = (e: Event) => {
-      console.error("Audio error:", e);
+      const audioEl = e.target as HTMLAudioElement;
+      const mediaErr = audioEl?.error;
+      console.error("Audio error:", e, "MediaError code:", mediaErr?.code, "message:", mediaErr?.message);
       toast.error("Failed to play this song");
       setIsPlaying(false);
     };
@@ -214,7 +216,9 @@ function App() {
     }
   }, [volume]);
 
-  // Core function to load + play a song (uses Blob URL - most reliable on Windows)
+  // Core function to load + play a song.
+  // Uses a base64 data URL from Rust — most reliable on WebKitGTK Linux.
+  // Blob URLs and asset:// URLs can trigger GLib-GObject NULL pointer crashes on WebKitGTK.
   const loadAndPlay = useCallback(async (song: Song, newQueue?: Song[]) => {
     if (!audioRef.current) return;
 
@@ -236,22 +240,19 @@ function App() {
     setIsPlaying(true); // optimistic — we're about to play
 
     try {
-      if (audio.src && audio.src.startsWith("blob:")) {
-        URL.revokeObjectURL(audio.src);
-      }
+      // Clear any previous source
+      audio.removeAttribute("src");
+      audio.load();
 
-      console.log("Playing:", song.title);
+      console.log("Playing:", song.title, "path:", song.path);
 
-      const { readFile } = await import("@tauri-apps/plugin-fs");
-      const data = await readFile(song.path);
+      // Read file as base64 data URL via Rust — avoids WebKitGTK blob/asset:// GLib crashes
+      const dataUrl = await invoke<string>("read_audio_base64", { path: song.path });
 
       // Aborted by a newer play request?
       if (gen !== playGenRef.current) return;
 
-      const blob = new Blob([data], { type: "audio/mpeg" });
-      const url = URL.createObjectURL(blob);
-
-      audio.src = url;
+      audio.src = dataUrl;
       audio.load();
 
       await new Promise<void>((resolve, reject) => {
@@ -259,9 +260,12 @@ function App() {
           cleanup();
           resolve();
         };
-        const onErr = () => {
+        const onErr = (ev: Event) => {
           cleanup();
-          reject(new Error("Failed to load audio"));
+          const target = ev.target as HTMLAudioElement;
+          const code = target?.error?.code;
+          const msg = target?.error?.message ?? "unknown";
+          reject(new Error(`MediaError ${code}: ${msg}`));
         };
         const cleanup = () => {
           audio.removeEventListener("canplay", onCanPlay);
@@ -269,10 +273,11 @@ function App() {
         };
         audio.addEventListener("canplay", onCanPlay);
         audio.addEventListener("error", onErr);
+        // Fallback timeout — if canplay never fires just try playing anyway
         setTimeout(() => {
           cleanup();
           resolve();
-        }, 5000);
+        }, 8000);
       });
 
       if (gen !== playGenRef.current) return;
