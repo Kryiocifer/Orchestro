@@ -36,6 +36,28 @@ body,
   background: #6a6a6a;
 }
 
+/* Slim sidebar scrollbar */
+.sidebar-scroll {
+  overflow-y: auto;
+}
+
+.sidebar-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+
 /* Hide number input arrows */
 input[type="range"] {
   -webkit-appearance: none;

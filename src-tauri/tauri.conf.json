@@ -24,7 +24,11 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$AUDIO/**", "$DOCUMENT/**", "$DOWNLOAD/**", "$HOME/**", "$APPDATA/**", "$DATA/**", "**/*.mp3", "**/*.flac", "**/*.m4a", "**/*.aac", "**/*.ogg", "**/*.wav"]
+      }
     }
   },
   "bundle": {
