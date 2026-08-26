@@ -1,49 +1,61 @@
-# Local Spotify
+# Orchestro 🎵
 
-A **lightweight**, fully offline Spotify-style desktop music player built with **Tauri 2 + React + TypeScript**.
-
-### Features
-- 100% local — no accounts, no APIs, no internet required
-- Extremely light on RAM & CPU (Tauri)
-- Drag & drop music files → auto-added to managed library
-- Toast feedback: **"Added!"** or **"Already exists"**
-- Real metadata extraction (title, artist, album, duration, cover art)
-- Create / delete playlists
-- Right-click any song → **Add to playlist**
-- Clean Spotify-inspired dark UI
-- Bottom player bar with seek + volume + cover art
-- Queue support
+A modern, ultra-lightweight, offline-first Spotify-style desktop music player and downloader built with **Tauri 2 + React + TypeScript + Rust**.
 
 ---
 
-## Getting Started
+## ✨ Features
+
+- **⚡ Blazing Fast & Lightweight**: Minimal RAM and CPU footprint powered by Tauri 2 and native Rust audio handling.
+- **📂 Smart Library & Subfolder Navigation**: Point to your music library folder. Browse all tracks at once or filter seamlessly by subfolder with clean navigation tabs.
+- **🎨 Immersive "Now Playing" Screen**: Click the current track in the bottom player bar to slide up a full-screen view with a dynamic blurred background, high-resolution album artwork, progress bar, and comprehensive controls.
+- **💾 Complete Session Persistence**: Automatically remembers your exact playback state across app restarts — including current song, time elapsed, queue order, volume, shuffle, and repeat modes.
+- **🗔 System Tray Integration**: Minimizes to the system tray on close with a native tray menu for instant restoration or exit, preventing accidental shutdowns during playback.
+- **📥 Spotify & YouTube Playlist Downloader**: Built-in downloader powered by `yt-dlp` and `ffmpeg`. Downloading a public Spotify playlist creates an organized folder with automatically tagged metadata and artwork.
+- **📜 Queue with "Play Next"**: Queue individual tracks or bulk selections to play immediately next without disrupting your ongoing playlist sequence.
+- **🏷️ Rich Metadata Extraction**: Automatic parsing of titles, artists, albums, durations, and embedded cover art for `.mp3`, `.flac`, `.wav`, `.ogg`, `.m4a`, and more.
+- **🎶 Playlists & Management**: Create custom playlists, right-click context menu actions, search filtering, and drag-and-drop ingestion.
+- **🔔 Refined Toast System**: Unobtrusive notifications positioned neatly above player controls.
+- **⌨️ Media Session API**: Native OS media keys and playback shortcuts support.
+
+---
+
+## 🚀 Getting Started
 
 ### Prerequisites
-- Node.js 18+
-- Rust (latest stable recommended)
-- System dependencies for Tauri (see [Tauri docs](https://v2.tauri.app/start/prerequisites/))
+- [Node.js](https://nodejs.org/) (v18 or newer)
+- [Rust](https://www.rust-lang.org/tools/install) (stable)
+- OS build dependencies (see [Tauri Prerequisites](https://v2.tauri.app/start/prerequisites/))
+- Optional for downloads: `yt-dlp` and `ffmpeg` installed on your PATH
 
-### Install & Run
+### Development
 
 ```bash
-cd local-spotify
+# Clone the repository
+git clone https://github.com/your-username/Orchestro.git
+cd Orchestro
+
+# Install dependencies
 npm install
+
+# Run in development mode
 npm run tauri dev
 ```
 
-### Build for production
+### Production Build
 
 ```bash
 npm run tauri build
 ```
 
-### Linux Installation & Building (Arch / CachyOS)
+---
 
-When building or running Orchestro on Linux, you need specific system libraries for the WebKit interface and audio playback (GStreamer). 
+## 🐧 Linux Installation & Building (Arch / CachyOS / Ubuntu / Debian)
 
-**1. Install required dependencies:**
+### 1. Install System Dependencies
+
+#### Arch Linux / CachyOS:
 ```bash
-# Arch / CachyOS
 sudo pacman -S --needed \
   webkit2gtk-4.1 \
   base-devel \
@@ -54,83 +66,76 @@ sudo pacman -S --needed \
   fuse2
 ```
 
-**2. Installing from a Release Download:**
-If you downloaded a pre-compiled binary or AppImage from the releases page, you can run it from **any folder** (Downloads, Desktop, etc.). It does not need to be in a specific system folder.
-
-For the **Native Binary** (Recommended for Arch):
+#### Ubuntu / Debian:
 ```bash
-# Make it executable
-chmod +x orchestro
-# Run it
-./orchestro
+sudo apt update
+sudo apt install -y \
+  libwebkit2gtk-4.1-dev \
+  build-essential \
+  curl wget libssl-dev \
+  libgtk-3-dev \
+  libayatana-appindicator3-dev \
+  librsvg2-dev \
+  libgstreamer1.0-dev \
+  libgstreamer-plugins-base1.0-dev \
+  gstreamer1.0-plugins-good \
+  gstreamer1.0-plugins-bad \
+  gstreamer1.0-plugins-ugly \
+  gstreamer1.0-libav
 ```
-*(Optional: You can move it to `~/.local/bin/` so you can launch it by just typing `orchestro` anywhere in your terminal, but it works fine from any location).*
 
-For the **AppImage**:
-```bash
-# Make it executable
-chmod +x Orchestro_0.1.0_amd64.AppImage
-# Run it
-./Orchestro_0.1.0_amd64.AppImage
-```
-> **Troubleshooting AppImages:** If the AppImage opens but audio crashes, WebKitGTK might be isolated from your system's GStreamer plugins. You can force it to see them by launching it like this: `GST_PLUGIN_SYSTEM_PATH_1_0=/usr/lib/gstreamer-1.0 ./Orchestro_0.1.0_amd64.AppImage`
+### 2. Building AppImage / Debian Bundles
 
-**3. Build the App from Source:**
-To properly build the `.AppImage` yourself (and avoid `linuxdeploy` failing or stripping essential libraries), use:
+To properly build the `.AppImage` on Linux without library stripping issues:
+
 ```bash
+npm run build:linux
+# or
 NO_STRIP=1 APPIMAGE_EXTRACT_AND_RUN=1 npm run tauri build
 ```
 
-Your compiled files will be located at:
-- **Native Binary:** `src-tauri/target/release/orchestro` 
-- **AppImage:** `src-tauri/target/release/bundle/appimage/Orchestro_0.1.0_amd64.AppImage`
-- **Debian:** `src-tauri/target/release/bundle/deb/Orchestro_0.1.0_amd64.deb`
+Artifacts will be located at:
+- **Native Binary:** `src-tauri/target/release/orchestro`
+- **AppImage:** `src-tauri/target/release/bundle/appimage/Orchestro_*.AppImage`
+- **Debian Package:** `src-tauri/target/release/bundle/deb/Orchestro_*.deb`
 
 ---
 
-## How to use
-
-1. Drag any `.mp3`, `.flac`, `.wav`, `.ogg`, `.m4a` etc. into the window
-2. Songs appear in **Your Library** with proper title/artist/album + cover
-3. Right-click a song → **Add to playlist**
-4. Create playlists from the sidebar
-5. Click play and enjoy
-
----
-
-## Project Structure
+## 📁 Project Structure
 
 ```
-local-spotify/
-├── src/                       # React frontend
+Orchestro/
+├── src/                         # React Frontend
 │   ├── components/
-│   │   ├── ContextMenu.tsx    # Right-click menu
-│   │   ├── HomeView.tsx
-│   │   ├── LibraryView.tsx
-│   │   ├── PlayerBar.tsx
-│   │   ├── PlaylistView.tsx
-│   │   └── Sidebar.tsx
+│   │   ├── ContextMenu.tsx      # Right-click context actions
+│   │   ├── DownloadPanel.tsx    # Live download queue & progress
+│   │   ├── HomeView.tsx         # Quick access & recently played
+│   │   ├── ImportView.tsx       # Spotify & YouTube playlist importer
+│   │   ├── LibraryView.tsx      # Filterable song library & folder tabs
+│   │   ├── NowPlayingView.tsx   # Full-screen immersive player view
+│   │   ├── PlayerBar.tsx        # Persistent bottom player controls
+│   │   ├── PlaylistView.tsx     # Custom playlists & track listings
+│   │   ├── Sidebar.tsx          # Navigation & library links
+│   │   └── YouTubeView.tsx      # In-app YouTube search & streaming
 │   ├── lib/
-│   │   ├── library.ts         # Core library + metadata logic
-│   │   ├── types.ts
-│   │   └── utils.ts
-│   ├── styles/
-│   ├── App.tsx
-│   └── main.tsx
-├── src-tauri/                 # Rust / Tauri
-└── package.json
+│   │   ├── library.ts           # Storage, scanning & metadata parsing
+│   │   ├── types.ts             # TypeScript interfaces & types
+│   │   └── utils.ts             # Formatting & helper utilities
+│   ├── styles/                  # Tailwind CSS & global styles
+│   ├── App.tsx                  # Main application container & state orchestration
+│   └── main.tsx                 # React entry point & toast configuration
+├── src-tauri/                   # Rust Backend
+│   ├── src/
+│   │   ├── main.rs              # Application entry
+│   │   └── lib.rs               # Commands (audio streaming, yt-dlp, tray, fs)
+│   ├── Cargo.toml               # Rust dependencies & metadata
+│   └── tauri.conf.json          # Tauri v2 configuration & window settings
+├── package.json
+└── vite.config.ts
 ```
 
 ---
 
-## Next planned features
-- Remove song from playlist / library
-- Drag to reorder inside playlists
-- YouTube search + download (yt-dlp)
-- Keyboard shortcuts
-- Mini player / system tray
-- Search inside library
+## 📄 License
 
----
-
-Made with 💜 for chill local listening
+MIT License. Crafted for clean, distraction-free local listening.

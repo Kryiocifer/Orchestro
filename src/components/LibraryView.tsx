@@ -8,27 +8,54 @@ import { cn } from "../lib/utils";
 interface LibraryViewProps {
   songs: Song[];
   playlists: Playlist[];
+  musicFolder?: string | null;
   currentSongId?: string;
   isPlaying: boolean;
-  onPlaySong: (song: Song) => void;
+  onPlaySong: (song: Song, queue?: Song[]) => void;
+  onAddToQueue: (songIds: string[]) => void;
   onAddToPlaylist: (songIds: string[], playlistId: string) => void;
   onCreatePlaylistAndAdd: (songIds: string[]) => void;
   onRemoveSong: (songIds: string[]) => void;
   onAddSongs: () => void;
 }
 
+function getSongFolder(song: Song, musicFolder?: string | null): string {
+  const normPath = song.path.replace(/\\/g, "/");
+  if (musicFolder) {
+    const normRoot = musicFolder.replace(/\\/g, "/").replace(/\/+$/, "");
+    if (normPath.toLowerCase().startsWith(normRoot.toLowerCase() + "/")) {
+      const rel = normPath.slice(normRoot.length + 1);
+      const parts = rel.split("/");
+      if (parts.length > 1) {
+        return parts[0];
+      }
+      return "Main Folder";
+    }
+  }
+  const lastSlash = normPath.lastIndexOf("/");
+  if (lastSlash > 0) {
+    const parentPath = normPath.slice(0, lastSlash);
+    const parentName = parentPath.split("/").pop();
+    if (parentName) return parentName;
+  }
+  return "Other";
+}
+
 export default function LibraryView({
   songs,
   playlists,
+  musicFolder,
   currentSongId,
   isPlaying,
   onPlaySong,
+  onAddToQueue,
   onAddToPlaylist,
   onCreatePlaylistAndAdd,
   onRemoveSong,
   onAddSongs,
 }: LibraryViewProps) {
   const [query, setQuery] = useState("");
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [lastClickedId, setLastClickedId] = useState<string | null>(null);
   const [sortConfig, setSortConfig] = useState<{ key: "sno" | "title" | "album" | "dateAdded" | "duration"; asc: boolean } | null>(null);
@@ -37,6 +64,25 @@ export default function LibraryView({
     y: number;
     songIds: string[];
   } | null>(null);
+
+  const folders = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const song of songs) {
+      const f = getSongFolder(song, musicFolder);
+      map.set(f, (map.get(f) || 0) + 1);
+    }
+    const list = Array.from(map.entries()).map(([name, count]) => ({
+      name,
+      count,
+    }));
+    list.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    return list;
+  }, [songs, musicFolder]);
+
+  const folderFilteredSongs = useMemo(() => {
+    if (!selectedFolder) return songs;
+    return songs.filter((s) => getSongFolder(s, musicFolder) === selectedFolder);
+  }, [songs, selectedFolder, musicFolder]);
 
   const handleSort = (key: "sno" | "title" | "album" | "dateAdded" | "duration") => {
     setSortConfig((prev) => {
@@ -50,7 +96,7 @@ export default function LibraryView({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let result = songs.map((song, index) => ({ song, originalIndex: index }));
+    let result = folderFilteredSongs.map((song, index) => ({ song, originalIndex: index }));
     
     if (q) {
       result = result.filter(
@@ -89,7 +135,7 @@ export default function LibraryView({
     }
 
     return result.map((r) => r.song);
-  }, [songs, query, sortConfig]);
+  }, [folderFilteredSongs, query, sortConfig]);
 
   const handleRowClick = (e: React.MouseEvent, song: Song, index: number) => {
     // Shift → range select from anchor
@@ -120,10 +166,10 @@ export default function LibraryView({
       return;
     }
 
-    // normal click → play, clear multi-select
+    // normal click → play with current filtered queue, clear multi-select
     setSelected(new Set());
     setLastClickedId(song.id);
-    onPlaySong(song);
+    onPlaySong(song, filtered);
   };
 
   const handleContextMenu = (e: React.MouseEvent, songId: string) => {
@@ -141,38 +187,90 @@ export default function LibraryView({
 
   return (
     <div className="p-8">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Your Library</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Your Library</h1>
           <p className="mt-1 text-sm text-spotify-lightgray">
-            {songs.length} song{songs.length !== 1 ? "s" : ""}
+            {selectedFolder
+              ? `${filtered.length} track${filtered.length !== 1 ? "s" : ""} in ${selectedFolder}`
+              : `${songs.length} track${songs.length !== 1 ? "s" : ""}${folders.length > 1 ? ` · ${folders.length} folders` : ""}`}
             {selected.size > 0 && (
-              <span className="text-spotify-green">
-                {" "}
-                · {selected.size} selected
-              </span>
+              <span className="text-white"> · {selected.size} selected</span>
             )}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-spotify-lightgray" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-spotify-lightgray" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search library…"
-              className="w-56 rounded-full bg-white/10 py-2 pl-9 pr-3 text-sm text-white outline-none ring-0 placeholder:text-spotify-lightgray focus:bg-white/15"
+              placeholder="Search…"
+              className="w-48 rounded-md border border-white/10 bg-white/5 py-1.5 pl-8 pr-3 text-sm text-white outline-none placeholder:text-spotify-lightgray focus:border-white/20 focus:bg-white/8"
             />
           </div>
           <button
             onClick={onAddSongs}
-            className="flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-medium transition hover:bg-white/20"
+            className="flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-spotify-lightgray transition hover:border-white/20 hover:text-white"
           >
-            <Plus className="h-4 w-4" />
-            Add Songs
+            <Plus className="h-3.5 w-3.5" />
+            Add
           </button>
         </div>
       </div>
+
+      {/* Folder tabs */}
+      {folders.length > 0 && (
+        <div className="mb-5 flex items-center gap-0 border-b border-white/[0.08]">
+          <button
+            onClick={() => {
+              setSelectedFolder(null);
+              setSelected(new Set());
+            }}
+            className={cn(
+              "relative -mb-px shrink-0 border-b-2 px-4 pb-2.5 pt-1 text-sm transition-colors",
+              selectedFolder === null
+                ? "border-white font-semibold text-white"
+                : "border-transparent text-spotify-lightgray hover:text-white/70"
+            )}
+          >
+            All
+            <span className={cn(
+              "ml-2 text-xs tabular-nums",
+              selectedFolder === null ? "text-white/50" : "text-white/25"
+            )}>
+              {songs.length}
+            </span>
+          </button>
+
+          {folders.map(({ name, count }) => {
+            const isActive = selectedFolder === name;
+            return (
+              <button
+                key={name}
+                onClick={() => {
+                  setSelectedFolder(isActive ? null : name);
+                  setSelected(new Set());
+                }}
+                className={cn(
+                  "relative -mb-px shrink-0 border-b-2 px-4 pb-2.5 pt-1 text-sm transition-colors",
+                  isActive
+                    ? "border-white font-semibold text-white"
+                    : "border-transparent text-spotify-lightgray hover:text-white/70"
+                )}
+              >
+                <span className="max-w-[160px] truncate">{name}</span>
+                <span className={cn(
+                  "ml-2 text-xs tabular-nums",
+                  isActive ? "text-white/50" : "text-white/25"
+                )}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {songs.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-[#333] py-24">
@@ -319,6 +417,10 @@ export default function LibraryView({
           y={contextMenu.y}
           playlists={playlists}
           selectionCount={contextMenu.songIds.length}
+          onAddToQueue={() => {
+            onAddToQueue(contextMenu.songIds);
+            setSelected(new Set());
+          }}
           onAddToPlaylist={(playlistId) => {
             onAddToPlaylist(contextMenu.songIds, playlistId);
             setSelected(new Set());

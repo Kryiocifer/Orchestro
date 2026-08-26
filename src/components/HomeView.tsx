@@ -7,6 +7,7 @@ interface HomeViewProps {
   songs: Song[];
   playlists: Playlist[];
   onPlaySong: (song: Song) => void;
+  onAddToQueue: (songId: string) => void;
   onSelectPlaylist: (id: string) => void;
   onAddSongs: () => void;
   onAddToPlaylist: (songId: string, playlistId: string) => void;
@@ -18,6 +19,7 @@ export default function HomeView({
   songs,
   playlists,
   onPlaySong,
+  onAddToQueue,
   onSelectPlaylist,
   onAddSongs,
   onAddToPlaylist,
@@ -126,6 +128,7 @@ export default function HomeView({
           x={contextMenu.x}
           y={contextMenu.y}
           playlists={playlists}
+          onAddToQueue={() => onAddToQueue(contextMenu.songId)}
           onAddToPlaylist={(playlistId) =>
             onAddToPlaylist(contextMenu.songId, playlistId)
           }

@@ -15,6 +15,7 @@ interface PlaylistViewProps {
   currentSongId?: string;
   isPlaying: boolean;
   onPlaySong: (song: Song, queue: Song[]) => void;
+  onAddToQueue: (songIds: string[]) => void;
   onUpdatePlaylist: (playlist: Playlist) => void;
   onAddToPlaylist: (songIds: string[], playlistId: string) => void;
   onCreatePlaylistAndAdd: (songIds: string[]) => void;
@@ -27,6 +28,7 @@ export default function PlaylistView({
   currentSongId,
   isPlaying,
   onPlaySong,
+  onAddToQueue,
   onAddToPlaylist,
   onCreatePlaylistAndAdd,
 }: PlaylistViewProps) {
@@ -374,6 +376,10 @@ export default function PlaylistView({
           playlists={playlists}
           selectionCount={contextMenu.songIds.length}
           showRemove={false}
+          onAddToQueue={() => {
+            onAddToQueue(contextMenu.songIds);
+            setSelected(new Set());
+          }}
           onAddToPlaylist={(playlistId) => {
             onAddToPlaylist(contextMenu.songIds, playlistId);
             setSelected(new Set());

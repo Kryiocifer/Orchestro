@@ -19,6 +19,17 @@ export interface Playlist {
   updatedAt: number;
 }
 
+export interface SavedPlaybackState {
+  songId: string;
+  position: number;
+  progress: number;
+  queueSongIds: string[];
+  originalQueueSongIds?: string[];
+  volume?: number;
+  shuffle?: boolean;
+  repeatMode?: "off" | "all" | "one";
+}
+
 export interface LibraryData {
   songs: Song[];
   playlists: Playlist[];
@@ -29,10 +40,7 @@ export interface LibraryData {
   /** Spotify Web API credentials (local only — do not commit) */
   spotifyClientId?: string | null;
   spotifyClientSecret?: string | null;
-  lastPlayed?: {
-    songId: string;
-    position: number;
-  };
+  lastPlayed?: SavedPlaybackState | null;
 }
 
 export type View = "home" | "library" | "playlist" | "youtube" | "import";

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import toast from "react-hot-toast";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { v4 as uuidv4 } from "uuid";
 import Sidebar from "./components/Sidebar";
 import PlayerBar, { RepeatMode } from "./components/PlayerBar";
 import LibraryView from "./components/LibraryView";
@@ -10,6 +11,7 @@ import HomeView from "./components/HomeView";
 import YouTubeView from "./components/YouTubeView";
 import ImportView from "./components/ImportView";
 import DownloadPanel, { DownloadJob } from "./components/DownloadPanel";
+import NowPlayingView from "./components/NowPlayingView";
 import {
   loadLibrary,
   addSongsBatch,
@@ -28,7 +30,7 @@ import {
   setDownloadFolder,
   addSongFromPath,
 } from "./lib/library";
-import { Song, LibraryData, View } from "./lib/types";
+import { Song, LibraryData, View, SavedPlaybackState } from "./lib/types";
 import { isAudioFile } from "./lib/utils";
 
 function App() {
@@ -47,6 +49,7 @@ function App() {
   const [isScanning, setIsScanning] = useState(false);
   const [downloadJobs, setDownloadJobs] = useState<DownloadJob[]>([]);
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
+  const [showNowPlaying, setShowNowPlaying] = useState(false);
 
 
   useEffect(() => {
@@ -63,13 +66,84 @@ function App() {
   const shuffleRef = useRef(false);
   const repeatRef = useRef<RepeatMode>("all");
   const originalQueueRef = useRef<Song[]>([]);
-  const loadAndPlayRef = useRef<(song: Song, q?: Song[]) => Promise<void>>(async () => {});
+  const loadAndPlayRef = useRef<(song: Song, q?: Song[], startTime?: number) => Promise<void>>(async () => {});
   const isAddingRef = useRef(false);
   const playGenRef = useRef(0);
   const isSwitchingRef = useRef(false);
   const playNextRef = useRef<() => void>(() => {});
   const playPreviousRef = useRef<() => void>(() => {});
   const togglePlayRef = useRef<() => void>(() => {});
+  const savedPositionRef = useRef(0);
+  const lastSaveTimeRef = useRef(0);
+  const saveSessionStateRef = useRef<(override?: Partial<SavedPlaybackState>) => void>(() => {});
+
+  const saveSessionState = useCallback(
+    (override?: Partial<SavedPlaybackState>) => {
+      const curr =
+        override?.songId !== undefined
+          ? library.songs.find((s) => s.id === override.songId)
+          : currentSongRef.current;
+
+      if (!curr) return;
+
+      const audio = audioRef.current;
+      const position =
+        override?.position !== undefined
+          ? override.position
+          : audio && !isNaN(audio.currentTime) && audio.currentTime > 0
+          ? audio.currentTime
+          : savedPositionRef.current;
+
+      const progressVal =
+        override?.progress !== undefined
+          ? override.progress
+          : audio && audio.duration && !isNaN(audio.duration) && audio.duration > 0
+          ? (position / audio.duration) * 100
+          : curr.duration > 0
+          ? (position / curr.duration) * 100
+          : 0;
+
+      const queueIds =
+        override?.queueSongIds !== undefined
+          ? override.queueSongIds
+          : queueRef.current.map((s) => s.id);
+
+      const origQueueIds =
+        override?.originalQueueSongIds !== undefined
+          ? override.originalQueueSongIds
+          : originalQueueRef.current.map((s) => s.id);
+
+      const state: SavedPlaybackState = {
+        songId: curr.id,
+        position: Math.max(0, position),
+        progress: Math.max(0, Math.min(100, progressVal)),
+        queueSongIds: queueIds.length > 0 ? queueIds : [curr.id],
+        originalQueueSongIds:
+          origQueueIds.length > 0
+            ? origQueueIds
+            : queueIds.length > 0
+            ? queueIds
+            : [curr.id],
+        volume: override?.volume !== undefined ? override.volume : volume,
+        shuffle:
+          override?.shuffle !== undefined ? override.shuffle : shuffleRef.current,
+        repeatMode:
+          override?.repeatMode !== undefined
+            ? override.repeatMode
+            : repeatRef.current,
+      };
+
+      try {
+        localStorage.setItem("orchestro_last_session", JSON.stringify(state));
+      } catch {}
+    },
+    [library.songs, volume]
+  );
+
+  useEffect(() => {
+    saveSessionStateRef.current = saveSessionState;
+  }, [saveSessionState]);
+
   /** Prevents media-key repeat / double-fire from skipping multiple songs */
   const skipLockRef = useRef(0); // timestamp of last next/prev
   const hydrateCancelRef = useRef(false);
@@ -120,7 +194,7 @@ function App() {
     repeatRef.current = repeatMode;
   }, [repeatMode]);
 
-  // Load library on mount — drop missing files, strip duplicates
+  // Load library on mount — drop missing files, strip duplicates, restore session
   useEffect(() => {
     (async () => {
       const { library: pruned, removed } = await pruneMissingSongs();
@@ -142,6 +216,69 @@ function App() {
           duration: 3000,
         });
       }
+
+      // Restore saved playback session
+      try {
+        let saved: SavedPlaybackState | null = null;
+        const raw = localStorage.getItem("orchestro_last_session");
+        if (raw) saved = JSON.parse(raw);
+        if (!saved && pruned.lastPlayed) saved = pruned.lastPlayed;
+
+        if (saved && saved.songId) {
+          const foundSong = songs.find((s) => s.id === saved!.songId);
+          if (foundSong) {
+            setCurrentSong(foundSong);
+            currentSongRef.current = foundSong;
+            const pos = saved.position || 0;
+            savedPositionRef.current = pos;
+
+            if (saved.progress && saved.progress > 0) {
+              setProgress(saved.progress);
+            } else if (pos > 0 && foundSong.duration > 0) {
+              setProgress((pos / foundSong.duration) * 100);
+            }
+
+            // Restore queue
+            let restoredQueue: Song[] = [];
+            if (saved.queueSongIds && saved.queueSongIds.length > 0) {
+              const byId = new Map(songs.map((s) => [s.id, s]));
+              restoredQueue = saved.queueSongIds
+                .map((id) => byId.get(id))
+                .filter(Boolean) as Song[];
+            }
+            if (restoredQueue.length === 0) {
+              restoredQueue = [foundSong];
+            }
+            setQueue(restoredQueue);
+            queueRef.current = restoredQueue;
+
+            // Restore originalQueue
+            if (saved.originalQueueSongIds && saved.originalQueueSongIds.length > 0) {
+              const byId = new Map(songs.map((s) => [s.id, s]));
+              originalQueueRef.current = saved.originalQueueSongIds
+                .map((id) => byId.get(id))
+                .filter(Boolean) as Song[];
+            } else {
+              originalQueueRef.current = [...restoredQueue];
+            }
+
+            if (saved.volume !== undefined && typeof saved.volume === "number") {
+              setVolume(saved.volume);
+            }
+            if (saved.shuffle !== undefined) {
+              setShuffle(saved.shuffle);
+              shuffleRef.current = saved.shuffle;
+            }
+            if (saved.repeatMode !== undefined) {
+              setRepeatMode(saved.repeatMode);
+              repeatRef.current = saved.repeatMode;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Session restore error:", err);
+      }
+
       void runDurationHydration(songs);
     })();
     return () => {
@@ -158,7 +295,25 @@ function App() {
     const onTimeUpdate = () => {
       if (isSwitchingRef.current) return;
       if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
-        setProgress((audio.currentTime / audio.duration) * 100);
+        const prog = (audio.currentTime / audio.duration) * 100;
+        setProgress(prog);
+        const now = Date.now();
+        if (now - lastSaveTimeRef.current > 1500) {
+          lastSaveTimeRef.current = now;
+          saveSessionStateRef.current({
+            position: audio.currentTime,
+            progress: prog,
+          });
+        }
+      }
+    };
+
+    const onPause = () => {
+      if (audio.duration && !isNaN(audio.duration)) {
+        saveSessionStateRef.current({
+          position: audio.currentTime,
+          progress: (audio.currentTime / audio.duration) * 100,
+        });
       }
     };
 
@@ -195,17 +350,33 @@ function App() {
       setIsPlaying(false);
     };
 
+    const onBeforeUnload = () => {
+      const audio = audioRef.current;
+      if (audio && audio.duration && !isNaN(audio.duration)) {
+        saveSessionStateRef.current({
+          position: audio.currentTime,
+          progress: (audio.currentTime / audio.duration) * 100,
+        });
+      } else {
+        saveSessionStateRef.current();
+      }
+    };
+
     audio.addEventListener("timeupdate", onTimeUpdate);
+    audio.addEventListener("pause", onPause);
     audio.addEventListener("ended", onEnded);
     audio.addEventListener("loadedmetadata", onLoadedMetadata);
     audio.addEventListener("error", onError);
+    window.addEventListener("beforeunload", onBeforeUnload);
 
     return () => {
       audio.pause();
       audio.removeEventListener("timeupdate", onTimeUpdate);
+      audio.removeEventListener("pause", onPause);
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("loadedmetadata", onLoadedMetadata);
       audio.removeEventListener("error", onError);
+      window.removeEventListener("beforeunload", onBeforeUnload);
     };
   }, []);
 
@@ -219,85 +390,104 @@ function App() {
   // Core function to load + play a song.
   // Uses a base64 data URL from Rust — most reliable on WebKitGTK Linux.
   // Blob URLs and asset:// URLs can trigger GLib-GObject NULL pointer crashes on WebKitGTK.
-  const loadAndPlay = useCallback(async (song: Song, newQueue?: Song[]) => {
-    if (!audioRef.current) return;
+  const loadAndPlay = useCallback(
+    async (song: Song, newQueue?: Song[], startTime: number = 0) => {
+      if (!audioRef.current) return;
 
-    const audio = audioRef.current;
-    const gen = ++playGenRef.current;
-    isSwitchingRef.current = true;
+      const audio = audioRef.current;
+      const gen = ++playGenRef.current;
+      isSwitchingRef.current = true;
 
-    // Stop current playback immediately so UI doesn't fight the old track
-    try {
-      audio.pause();
-    } catch {}
-    setProgress(0);
-    setCurrentSong(song);
-    currentSongRef.current = song;
-    if (newQueue) {
-      setQueue(newQueue);
-      queueRef.current = newQueue;
-    }
-    setIsPlaying(true); // optimistic — we're about to play
+      // Stop current playback immediately so UI doesn't fight the old track
+      try {
+        audio.pause();
+      } catch {}
+      setProgress(song.duration > 0 ? (startTime / song.duration) * 100 : 0);
+      setCurrentSong(song);
+      currentSongRef.current = song;
+      savedPositionRef.current = startTime;
+      if (newQueue) {
+        setQueue(newQueue);
+        queueRef.current = newQueue;
+      }
+      setIsPlaying(true); // optimistic — we're about to play
 
-    try {
-      // Clear any previous source
-      audio.removeAttribute("src");
-      audio.load();
-
-      console.log("Playing:", song.title, "path:", song.path);
-
-      // Read file as base64 data URL via Rust — avoids WebKitGTK blob/asset:// GLib crashes
-      const dataUrl = await invoke<string>("read_audio_base64", { path: song.path });
-
-      // Aborted by a newer play request?
-      if (gen !== playGenRef.current) return;
-
-      audio.src = dataUrl;
-      audio.load();
-
-      await new Promise<void>((resolve, reject) => {
-        const onCanPlay = () => {
-          cleanup();
-          resolve();
-        };
-        const onErr = (ev: Event) => {
-          cleanup();
-          const target = ev.target as HTMLAudioElement;
-          const code = target?.error?.code;
-          const msg = target?.error?.message ?? "unknown";
-          reject(new Error(`MediaError ${code}: ${msg}`));
-        };
-        const cleanup = () => {
-          audio.removeEventListener("canplay", onCanPlay);
-          audio.removeEventListener("error", onErr);
-        };
-        audio.addEventListener("canplay", onCanPlay);
-        audio.addEventListener("error", onErr);
-        // Fallback timeout — if canplay never fires just try playing anyway
-        setTimeout(() => {
-          cleanup();
-          resolve();
-        }, 8000);
+      const qIds = (newQueue || queueRef.current).map((s) => s.id);
+      saveSessionStateRef.current({
+        songId: song.id,
+        position: startTime,
+        progress: song.duration > 0 ? (startTime / song.duration) * 100 : 0,
+        queueSongIds: qIds.length > 0 ? qIds : [song.id],
       });
 
-      if (gen !== playGenRef.current) return;
+      try {
+        // Clear any previous source
+        audio.removeAttribute("src");
+        audio.load();
 
-      audio.currentTime = 0;
-      await audio.play();
+        console.log("Playing:", song.title, "path:", song.path, "startTime:", startTime);
 
-      if (gen !== playGenRef.current) return;
+        // Read file as base64 data URL via Rust — avoids WebKitGTK blob/asset:// GLib crashes
+        const dataUrl = await invoke<string>("read_audio_base64", { path: song.path });
 
-      setIsPlaying(true);
-      setProgress(0);
-      isSwitchingRef.current = false;
-    } catch (err) {
-      if (gen !== playGenRef.current) return;
-      console.error("Play failed:", err);
-      toast.error("Could not play this song");
-      setIsPlaying(false);
-      isSwitchingRef.current = false;
-    }
-  }, []);
+        // Aborted by a newer play request?
+        if (gen !== playGenRef.current) return;
+
+        audio.src = dataUrl;
+        audio.load();
+
+        await new Promise<void>((resolve, reject) => {
+          const onCanPlay = () => {
+            cleanup();
+            resolve();
+          };
+          const onErr = (ev: Event) => {
+            cleanup();
+            const target = ev.target as HTMLAudioElement;
+            const code = target?.error?.code;
+            const msg = target?.error?.message ?? "unknown";
+            reject(new Error(`MediaError ${code}: ${msg}`));
+          };
+          const cleanup = () => {
+            audio.removeEventListener("canplay", onCanPlay);
+            audio.removeEventListener("error", onErr);
+          };
+          audio.addEventListener("canplay", onCanPlay);
+          audio.addEventListener("error", onErr);
+          // Fallback timeout — if canplay never fires just try playing anyway
+          setTimeout(() => {
+            cleanup();
+            resolve();
+          }, 8000);
+        });
+
+        if (gen !== playGenRef.current) return;
+
+        if (startTime > 0 && Number.isFinite(startTime)) {
+          audio.currentTime = startTime;
+        } else {
+          audio.currentTime = 0;
+        }
+
+        await audio.play();
+
+        if (gen !== playGenRef.current) return;
+
+        setIsPlaying(true);
+        if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
+          setProgress((audio.currentTime / audio.duration) * 100);
+        }
+        isSwitchingRef.current = false;
+      } catch (err) {
+        if (gen !== playGenRef.current) return;
+        console.error("Play failed:", err);
+        toast.error("Could not play this song");
+        setIsPlaying(false);
+        isSwitchingRef.current = false;
+      }
+    },
+    []
+  );
 
   // Keep loadAndPlayRef always up to date
   useEffect(() => {
@@ -358,6 +548,86 @@ function App() {
       loadAndPlay(song, q);
     },
     [loadAndPlay, buildQueue, library.songs]
+  );
+
+  const addToQueue = useCallback(
+    (songOrSongs: Song | Song[] | string | string[]) => {
+      let toAdd: Song[] = [];
+      if (Array.isArray(songOrSongs)) {
+        if (songOrSongs.length === 0) return;
+        if (typeof songOrSongs[0] === "string") {
+          const idSet = new Set(songOrSongs as string[]);
+          toAdd = library.songs.filter((s) => idSet.has(s.id));
+        } else {
+          toAdd = songOrSongs as Song[];
+        }
+      } else if (typeof songOrSongs === "string") {
+        const found = library.songs.find((s) => s.id === songOrSongs);
+        if (found) toAdd = [found];
+      } else if (songOrSongs) {
+        toAdd = [songOrSongs];
+      }
+
+      if (toAdd.length === 0) return;
+
+      if (!currentSongRef.current) {
+        playSong(toAdd[0], toAdd);
+        toast.success(
+          toAdd.length === 1
+            ? `Playing "${toAdd[0].title}"`
+            : `Playing 1 of ${toAdd.length} songs`
+        );
+        return;
+      }
+
+      setQueue((prev) => {
+        // Insert immediately after the current song so queued tracks play next
+        const currIdx = prev.findIndex((s) => s.id === currentSongRef.current?.id);
+        const insertAt = currIdx >= 0 ? currIdx + 1 : prev.length;
+        const next = [
+          ...prev.slice(0, insertAt),
+          ...toAdd,
+          ...prev.slice(insertAt),
+        ];
+        queueRef.current = next;
+        saveSessionStateRef.current({ queueSongIds: next.map((s) => s.id) });
+        return next;
+      });
+      originalQueueRef.current = [...originalQueueRef.current, ...toAdd];
+
+      if (toAdd.length === 1) {
+        toast.success(`"${toAdd[0].title}" plays next`);
+      } else {
+        toast.success(`${toAdd.length} songs play next`);
+      }
+    },
+    [library.songs, playSong]
+  );
+
+  const removeFromQueue = useCallback((index: number) => {
+    setQueue((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      queueRef.current = next;
+      saveSessionStateRef.current({ queueSongIds: next.map((s) => s.id) });
+      return next;
+    });
+  }, []);
+
+  const clearQueue = useCallback(() => {
+    const curr = currentSongRef.current;
+    const next = curr ? [curr] : [];
+    setQueue(next);
+    queueRef.current = next;
+    originalQueueRef.current = next;
+    saveSessionStateRef.current({ queueSongIds: next.map((s) => s.id) });
+    toast.success("Queue cleared");
+  }, []);
+
+  const playQueueItem = useCallback(
+    (song: Song) => {
+      loadAndPlay(song, queueRef.current);
+    },
+    [loadAndPlay]
   );
 
   const playNext = useCallback(() => {
@@ -477,6 +747,7 @@ function App() {
     const next = !shuffleRef.current;
     shuffleRef.current = next;
     setShuffle(next);
+    saveSessionStateRef.current({ shuffle: next });
 
     const curr = currentSongRef.current;
     const base =
@@ -489,6 +760,7 @@ function App() {
       // buildQueue reads shuffleRef which we already set
       queueRef.current = q;
       setQueue(q);
+      saveSessionStateRef.current({ queueSongIds: q.map((s) => s.id) });
       console.log(
         "Shuffle",
         next ? "ON" : "OFF",
@@ -503,6 +775,7 @@ function App() {
       const next: RepeatMode =
         prev === "off" ? "all" : prev === "all" ? "one" : "off";
       repeatRef.current = next;
+      saveSessionStateRef.current({ repeatMode: next });
       return next;
     });
   }, []);
@@ -515,6 +788,15 @@ function App() {
       if (library.songs.length > 0) {
         playSong(library.songs[0], library.songs);
       }
+      return;
+    }
+
+    // If audio element does not have src loaded yet (e.g. restored from previous session)
+    if (!audio.src) {
+      const song = currentSongRef.current;
+      const q = queueRef.current.length > 0 ? queueRef.current : [song];
+      const startPos = savedPositionRef.current || 0;
+      loadAndPlay(song, q, startPos);
       return;
     }
 
@@ -531,7 +813,7 @@ function App() {
       audio.pause();
       setIsPlaying(false);
     }
-  }, [library.songs, playSong]);
+  }, [library.songs, playSong, loadAndPlay]);
 
   useEffect(() => {
     playPreviousRef.current = playPrevious;
@@ -675,9 +957,17 @@ function App() {
 
   const seek = useCallback((percent: number) => {
     const audio = audioRef.current;
-    if (audio && audio.duration && !isNaN(audio.duration)) {
-      audio.currentTime = (percent / 100) * audio.duration;
+    if (audio && audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
+      const pos = (percent / 100) * audio.duration;
+      audio.currentTime = pos;
       setProgress(percent);
+      savedPositionRef.current = pos;
+      saveSessionStateRef.current({ position: pos, progress: percent });
+    } else if (currentSongRef.current && currentSongRef.current.duration) {
+      const pos = (percent / 100) * currentSongRef.current.duration;
+      setProgress(percent);
+      savedPositionRef.current = pos;
+      saveSessionStateRef.current({ position: pos, progress: percent });
     }
   }, []);
 
@@ -905,7 +1195,7 @@ function App() {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
     const processOne = async (next: DownloadJob) => {
-      const folder = downloadFolderRef.current;
+      const folder = next.folder || downloadFolderRef.current;
       if (!folder) return;
 
       setDownloadJobs((prev) =>
@@ -951,7 +1241,28 @@ function App() {
         // Fast path: add to library without spamming toasts on bulk imports
         try {
           const fileName = filePath.split(/[/\\]/).pop() || next.title;
-          await addSongFromPath(filePath, fileName, 0);
+          const res = await addSongFromPath(filePath, fileName, 0);
+          if (next.playlistName && res?.song) {
+            const lib = await loadLibrary();
+            let pl = lib.playlists.find(
+              (p) => p.name.toLowerCase() === next.playlistName!.toLowerCase()
+            );
+            if (!pl) {
+              pl = {
+                id: uuidv4(),
+                name: next.playlistName,
+                songIds: [res.song.id],
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+              };
+              lib.playlists.push(pl);
+            } else if (!pl.songIds.includes(res.song.id)) {
+              pl.songIds.push(res.song.id);
+              pl.updatedAt = Date.now();
+            }
+            await saveLibrary(lib);
+            setLibrary(lib);
+          }
         } catch {
           /* still mark done — file is on disk */
         }
@@ -1012,7 +1323,7 @@ function App() {
           await sleep(100);
           continue;
         }
-        if (!downloadFolderRef.current) {
+        if (!next.folder && !downloadFolderRef.current) {
           await sleep(1000);
           continue;
         }
@@ -1286,6 +1597,7 @@ function App() {
               songs={library.songs}
               playlists={library.playlists}
               onPlaySong={(song) => playSong(song, library.songs)}
+              onAddToQueue={addToQueue}
               onSelectPlaylist={(id) => {
                 setActivePlaylistId(id);
                 setCurrentView("playlist");
@@ -1304,9 +1616,13 @@ function App() {
             <LibraryView
               songs={library.songs}
               playlists={library.playlists}
+              musicFolder={library.musicFolder}
               currentSongId={currentSong?.id}
               isPlaying={isPlaying}
-              onPlaySong={(song) => playSong(song, library.songs)}
+              onPlaySong={(song, queueSongs) =>
+                playSong(song, queueSongs || library.songs)
+              }
+              onAddToQueue={addToQueue}
               onAddToPlaylist={handleAddToPlaylist}
               onCreatePlaylistAndAdd={handleCreatePlaylistAndAdd}
               onRemoveSong={handleRemoveSong}
@@ -1343,6 +1659,7 @@ function App() {
               currentSongId={currentSong?.id}
               isPlaying={isPlaying}
               onPlaySong={(song, queueSongs) => playSong(song, queueSongs)}
+              onAddToQueue={addToQueue}
               onUpdatePlaylist={async (updated) => {
                 await updatePlaylist(updated);
                 setLibrary((prev) => ({
@@ -1418,6 +1735,28 @@ function App() {
         }}
       />
 
+      {showNowPlaying && currentSong && (
+        <NowPlayingView
+          song={currentSong}
+          isPlaying={isPlaying}
+          progress={progress}
+          volume={volume}
+          shuffle={shuffle}
+          repeatMode={repeatMode}
+          onClose={() => setShowNowPlaying(false)}
+          onTogglePlay={togglePlay}
+          onNext={playNext}
+          onPrevious={playPrevious}
+          onSeek={seek}
+          onVolumeChange={(v) => {
+            setVolume(v);
+            saveSessionStateRef.current({ volume: v });
+          }}
+          onToggleShuffle={handleToggleShuffle}
+          onCycleRepeat={handleCycleRepeat}
+        />
+      )}
+
       <PlayerBar
         currentSong={currentSong}
         isPlaying={isPlaying}
@@ -1425,13 +1764,21 @@ function App() {
         volume={volume}
         shuffle={shuffle}
         repeatMode={repeatMode}
+        queue={queue}
         onTogglePlay={togglePlay}
         onNext={playNext}
         onPrevious={playPrevious}
         onSeek={seek}
-        onVolumeChange={setVolume}
+        onVolumeChange={(v) => {
+          setVolume(v);
+          saveSessionStateRef.current({ volume: v });
+        }}
         onToggleShuffle={handleToggleShuffle}
         onCycleRepeat={handleCycleRepeat}
+        onPlayQueueItem={playQueueItem}
+        onRemoveFromQueue={removeFromQueue}
+        onClearQueue={clearQueue}
+        onSongInfoClick={currentSong ? () => setShowNowPlaying(true) : undefined}
       />
     </div>
   );

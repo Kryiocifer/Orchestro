@@ -236,6 +236,18 @@ export default function ImportView({
     selected.forEach((i) => {
       if (result.tracks[i]) tracks.push(result.tracks[i]);
     });
+
+    const rawName = (result.name || "Imported Playlist").trim();
+    const sanitizedFolder = rawName
+      .replace(/[<>:"/\\|?*]/g, "_")
+      .replace(/[.\s]+$/, "")
+      .trim() || "Imported Playlist";
+
+    const sep = downloadFolder.includes("\\") ? "\\" : "/";
+    const targetFolder = downloadFolder.endsWith("\\") || downloadFolder.endsWith("/")
+      ? `${downloadFolder}${sanitizedFolder}`
+      : `${downloadFolder}${sep}${sanitizedFolder}`;
+
     setJobs((prev) => {
       const newJobs: DownloadJob[] = tracks.map((track) => {
         const query = `${track.title} ${track.artist}`.trim();
@@ -245,11 +257,15 @@ export default function ImportView({
           percent: 0,
           status: "queued",
           message: `search:${query}`,
+          folder: targetFolder,
+          playlistName: rawName,
         };
       });
       return [...newJobs, ...prev];
     });
-    toast.success(`Queued ${tracks.length} download${tracks.length > 1 ? "s" : ""}`);
+    toast.success(
+      `Queued ${tracks.length} download${tracks.length > 1 ? "s" : ""} into folder "${sanitizedFolder}"`
+    );
   };
 
   const folderLabel = downloadFolder
@@ -491,6 +507,11 @@ export default function ImportView({
               <p className="truncate font-semibold">{result.name}</p>
               <p className="text-xs text-spotify-lightgray">
                 {result.tracks.length} tracks · {selected.size} selected
+                {downloadFolder && (
+                  <span className="ml-2 font-medium text-spotify-green">
+                    📁 Saving into /{result.name.replace(/[<>:"/\\|?*]/g, "_").replace(/[.\s]+$/, "").trim()}
+                  </span>
+                )}
               </p>
             </div>
 

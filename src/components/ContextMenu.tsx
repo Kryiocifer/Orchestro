@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Playlist } from "../lib/types";
-import { ListMusic, Plus, Trash2 } from "lucide-react";
+import { ListMusic, Plus, Trash2, ListPlus } from "lucide-react";
 
 interface ContextMenuProps {
   x: number;
@@ -8,6 +8,7 @@ interface ContextMenuProps {
   playlists: Playlist[];
   /** How many songs are targeted (1 = single, >1 = bulk) */
   selectionCount?: number;
+  onAddToQueue?: () => void;
   onAddToPlaylist: (playlistId: string) => void;
   onCreateAndAdd: () => void;
   onRemove?: () => void;
@@ -21,6 +22,7 @@ export default function ContextMenu({
   y,
   playlists,
   selectionCount = 1,
+  onAddToQueue,
   onAddToPlaylist,
   onCreateAndAdd,
   onRemove,
@@ -64,6 +66,22 @@ export default function ContextMenu({
         <div className="px-3 py-1.5 text-xs text-spotify-green">
           {selectionCount} songs selected
         </div>
+      )}
+
+      {onAddToQueue && (
+        <>
+          <button
+            onClick={() => {
+              onAddToQueue();
+              onClose();
+            }}
+            className="flex w-full items-center gap-3 px-3 py-2 text-sm text-white transition hover:bg-[#3e3e3e]"
+          >
+            <ListPlus className="h-4 w-4 text-spotify-green" />
+            {bulk ? "Add selected to queue" : "Add to queue"}
+          </button>
+          <div className="my-1 border-t border-[#3e3e3e]" />
+        </>
       )}
 
       <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-spotify-lightgray">

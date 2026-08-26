@@ -8,6 +8,8 @@ export interface DownloadJob {
   percent: number;
   status: "queued" | "downloading" | "converting" | "done" | "error" | "cancelled";
   message?: string;
+  folder?: string;
+  playlistName?: string;
 }
 
 interface DownloadPanelProps {
