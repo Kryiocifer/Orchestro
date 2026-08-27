@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   ChevronDown,
   Play,
@@ -8,19 +8,28 @@ import {
   Shuffle,
   Repeat,
   Repeat1,
-  Volume2,
-  VolumeX,
-  Volume1,
+  Mic2,
+  Disc3,
+  Sliders,
+  RefreshCw,
+  RotateCcw,
+  Timer,
 } from "lucide-react";
 import { Song } from "../lib/types";
-import { formatTime } from "../lib/utils";
-import { cn } from "../lib/utils";
+import { formatTime, cn } from "../lib/utils";
 import { RepeatMode } from "./PlayerBar";
+import {
+  fetchLyrics,
+  LyricsData,
+  getLyricOffset,
+  saveLyricOffset,
+} from "../lib/lyrics";
 
 interface NowPlayingViewProps {
   song: Song;
   isPlaying: boolean;
   progress: number;
+  currentTime?: number;
   volume: number;
   shuffle: boolean;
   repeatMode: RepeatMode;
@@ -32,13 +41,14 @@ interface NowPlayingViewProps {
   onVolumeChange: (vol: number) => void;
   onToggleShuffle: () => void;
   onCycleRepeat: () => void;
+  onOpenEqualizer?: () => void;
 }
 
 export default function NowPlayingView({
   song,
   isPlaying,
   progress,
-  volume,
+  currentTime,
   shuffle,
   repeatMode,
   onClose,
@@ -46,12 +56,22 @@ export default function NowPlayingView({
   onNext,
   onPrevious,
   onSeek,
-  onVolumeChange,
   onToggleShuffle,
   onCycleRepeat,
+  onOpenEqualizer,
 }: NowPlayingViewProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [viewMode, setViewMode] = useState<"artwork" | "lyrics">("artwork");
+  const [lyrics, setLyrics] = useState<LyricsData | null>(null);
+  const [loadingLyrics, setLoadingLyrics] = useState(false);
+  const [userIsScrolling, setUserIsScrolling] = useState(false);
+  const [lyricOffset, setLyricOffset] = useState<number>(() => getLyricOffset(song.id));
+  const [showOffsetControls, setShowOffsetControls] = useState(false);
 
+  const scrollTimeoutRef = useRef<number | null>(null);
+  const activeLineRef = useRef<HTMLButtonElement | null>(null);
+  const lyricsContainerRef = useRef<HTMLDivElement>(null);
+
+  // Close on Escape
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -60,149 +80,384 @@ export default function NowPlayingView({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Lock body scroll
   useEffect(() => {
     document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = ""; };
+    return () => {
+      document.body.style.overflow = "";
+    };
   }, []);
 
-  const elapsed = (progress / 100) * (song.duration || 0);
-  const VolumeIcon = volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
+  // Fetch lyrics
+  const loadSongLyrics = useCallback(async () => {
+    setLoadingLyrics(true);
+    setLyrics(null);
+    setLyricOffset(getLyricOffset(song.id));
+    try {
+      const data = await fetchLyrics(song.title, song.artist, song.duration);
+      setLyrics(data);
+    } catch (err) {
+      console.warn("Failed to load lyrics:", err);
+    } finally {
+      setLoadingLyrics(false);
+    }
+  }, [song.id, song.title, song.artist, song.duration]);
+
+  useEffect(() => {
+    loadSongLyrics();
+  }, [loadSongLyrics]);
+
+  // Exact time pipeline
+  const effectiveCurrentTime =
+    typeof currentTime === "number" && !isNaN(currentTime) && currentTime >= 0
+      ? currentTime
+      : (progress / 100) * (song.duration || 0);
+
+  // Determine active line
+  let activeLyricIndex = -1;
+  if (lyrics?.synced && lyrics.lines.length > 0) {
+    for (let i = 0; i < lyrics.lines.length; i++) {
+      const lineTime = lyrics.lines[i].time + lyricOffset;
+      if (effectiveCurrentTime >= lineTime) {
+        activeLyricIndex = i;
+      } else {
+        break;
+      }
+    }
+  }
+
+  // Handle User Scroll detection
+  const handleUserManualInteraction = () => {
+    setUserIsScrolling(true);
+    if (scrollTimeoutRef.current) {
+      window.clearTimeout(scrollTimeoutRef.current);
+    }
+    scrollTimeoutRef.current = window.setTimeout(() => {
+      setUserIsScrolling(false);
+    }, 2500); // Wait 2.5s after last touch before auto-scrolling again
+  };
+
+  // Reset user scroll when changing view modes
+  useEffect(() => {
+    if (viewMode === "lyrics") {
+      setUserIsScrolling(false);
+    }
+  }, [viewMode]);
+
+  // Auto-scroll logic
+  useEffect(() => {
+    if (viewMode !== "lyrics" || userIsScrolling || activeLyricIndex < 0 || !activeLineRef.current) {
+      return;
+    }
+    
+    // Using standard scrollIntoView API
+    try {
+      activeLineRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    } catch (e) {
+      console.error("Scroll to lyric failed", e);
+    }
+  }, [activeLyricIndex, viewMode, userIsScrolling]);
 
   return (
     <div
-      ref={containerRef}
-      className="fixed inset-0 z-[200] flex flex-col"
-      style={{ animation: "nowPlayingSlideUp 0.32s cubic-bezier(0.32,0.72,0,1) both" }}
+      className="fixed inset-0 z-[200] flex flex-col bg-[#121212]"
+      style={{
+        animation: "nowPlayingSlideUp 0.35s cubic-bezier(0.25,1,0.5,1) both",
+      }}
     >
-      <div className="absolute inset-0 overflow-hidden">
+      {/* Background layer */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
         {song.cover ? (
           <>
             <img
               src={song.cover}
               alt=""
               className="absolute inset-0 h-full w-full scale-110 object-cover"
-              style={{ filter: "blur(60px) brightness(0.35) saturate(1.4)" }}
+              style={{ filter: "blur(70px) brightness(0.3) saturate(1.2)" }}
             />
-            <div className="absolute inset-0 bg-black/50" />
+            <div className="absolute inset-0 bg-black/40" />
           </>
         ) : (
-          <div className="absolute inset-0 bg-gradient-to-b from-[#1a1a2e] via-[#16213e] to-[#0f3460]" />
+          <div className="absolute inset-0 bg-gradient-to-b from-[#1a1a2e] to-[#0f3460] opacity-80" />
         )}
-        <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-black/60 to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black/80 to-transparent" />
       </div>
 
-      <div className="relative flex flex-1 flex-col items-center justify-between px-8 pb-10 pt-6">
-        <div className="flex w-full max-w-lg items-center justify-between">
+      {/* Header */}
+      <div className="relative z-10 flex w-full items-center justify-between px-8 pt-6 pb-2">
+        <button
+          onClick={onClose}
+          className="flex items-center gap-1.5 rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-white/80 transition hover:bg-white/20 hover:text-white"
+        >
+          <ChevronDown className="h-4 w-4" />
+          <span>Now Playing</span>
+        </button>
+
+        <div className="flex items-center rounded-full bg-black/40 p-1 border border-white/10">
           <button
-            onClick={onClose}
-            className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-sm text-white/70 backdrop-blur transition hover:bg-white/15 hover:text-white"
-          >
-            <ChevronDown className="h-4 w-4" />
-            Now Playing
-          </button>
-          <div className="text-xs text-white/30 tabular-nums">
-            {song.album || ""}
-          </div>
-        </div>
-
-        <div className="flex w-full max-w-sm flex-1 items-center justify-center py-6">
-          <div
-            className="aspect-square w-full max-w-[320px] overflow-hidden rounded-2xl"
-            style={{
-              boxShadow: "0 32px 80px rgba(0,0,0,0.7)",
-              animation: "nowPlayingArtIn 0.4s cubic-bezier(0.34,1.56,0.64,1) 0.1s both",
-            }}
-          >
-            {song.cover ? (
-              <img src={song.cover} alt={song.title} className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center bg-[#282828] text-8xl">
-                🎵
-              </div>
+            onClick={() => setViewMode("artwork")}
+            className={cn(
+              "flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition",
+              viewMode === "artwork" ? "bg-white/20 text-white" : "text-white/50 hover:text-white/80"
             )}
-          </div>
+          >
+            <Disc3 className="h-4 w-4" />
+            <span>Cover</span>
+          </button>
+          <button
+            onClick={() => setViewMode("lyrics")}
+            className={cn(
+              "flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition",
+              viewMode === "lyrics" ? "bg-white/20 text-white" : "text-white/50 hover:text-white/80"
+            )}
+          >
+            <Mic2 className="h-4 w-4" />
+            <span>Lyrics</span>
+          </button>
         </div>
 
-        <div className="flex w-full max-w-lg flex-col gap-6">
-          <div>
-            <h2 className="truncate text-2xl font-bold tracking-tight text-white" title={song.title}>
+        <div className="flex items-center gap-2">
+          {viewMode === "lyrics" && lyrics && (
+            <button
+              onClick={() => setShowOffsetControls((v) => !v)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold transition",
+                showOffsetControls || lyricOffset !== 0
+                  ? "bg-spotify-green text-black"
+                  : "bg-white/10 text-white/80 hover:bg-white/20"
+              )}
+            >
+              <Timer className="h-4 w-4" />
+              <span>
+                {lyricOffset !== 0
+                  ? `${lyricOffset > 0 ? "+" : ""}${lyricOffset.toFixed(1)}s`
+                  : "Sync"}
+              </span>
+            </button>
+          )}
+
+          {onOpenEqualizer && (
+            <button
+              onClick={onOpenEqualizer}
+              className="flex items-center gap-1.5 rounded-full bg-white/10 px-4 py-2 text-xs font-medium text-white/80 transition hover:bg-white/20"
+            >
+              <Sliders className="h-4 w-4 text-spotify-green" />
+              <span>EQ</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Sync popover */}
+      {viewMode === "lyrics" && showOffsetControls && (
+        <div className="relative z-20 flex w-full justify-end px-8">
+          <div className="absolute top-2 w-72 rounded-xl bg-[#282828] p-4 shadow-2xl border border-white/10">
+            <div className="flex justify-between items-center text-xs mb-3">
+              <span className="font-semibold text-white/80">Lyrics Offset</span>
+              <span className="text-spotify-green font-mono">{lyricOffset.toFixed(1)}s</span>
+            </div>
+            <input
+              type="range"
+              min={-15}
+              max={15}
+              step={0.1}
+              value={lyricOffset}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                setLyricOffset(val);
+                saveLyricOffset(song.id, val);
+              }}
+              className="w-full accent-spotify-green mb-3"
+            />
+            <div className="flex justify-between">
+              <button
+                onClick={() => {
+                  setLyricOffset(0);
+                  saveLyricOffset(song.id, 0);
+                }}
+                className="text-xs text-white/50 hover:text-white flex items-center gap-1"
+              >
+                <RotateCcw className="h-3 w-3" /> Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Center Display Area */}
+      <div className="relative flex flex-1 w-full overflow-hidden">
+        {viewMode === "artwork" ? (
+          <div className="flex h-full w-full items-center justify-center p-8">
+            <div className="aspect-square w-full max-w-sm overflow-hidden rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
+              {song.cover ? (
+                <img src={song.cover} alt={song.title} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-[#282828] text-6xl">🎵</div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="relative flex h-full w-full flex-col items-center">
+            {/* Top/Bottom Fade Overlays to replace mask-image */}
+            <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-[#121212]/80 to-transparent pointer-events-none z-10" />
+            <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-[#121212]/80 to-transparent pointer-events-none z-10" />
+
+            {/* The Scrollable Lyrics Container */}
+            <div
+              ref={lyricsContainerRef}
+              className="sidebar-scroll w-full flex-1 overflow-y-auto px-4 relative z-0"
+              onWheel={handleUserManualInteraction}
+              onTouchStart={handleUserManualInteraction}
+              onMouseDown={handleUserManualInteraction}
+            >
+              {loadingLyrics ? (
+                <div className="flex h-full items-center justify-center gap-2 text-white/50">
+                  <RefreshCw className="h-5 w-5 animate-spin text-spotify-green" />
+                  <span>Loading lyrics...</span>
+                </div>
+              ) : lyrics?.synced && lyrics.lines.length > 0 ? (
+                <div className="flex flex-col items-center gap-8 py-[45vh]">
+                  {lyrics.lines.map((line, idx) => {
+                    const isActive = idx === activeLyricIndex;
+                    const isPast = idx < activeLyricIndex;
+                    const seekTime = line.time + lyricOffset;
+
+                    return (
+                      <button
+                        key={idx}
+                        ref={(el) => {
+                          if (isActive && el) {
+                            activeLineRef.current = el;
+                          }
+                        }}
+                        onClick={() => {
+                          handleUserManualInteraction(); // clicking is an interaction
+                          onSeek(
+                            song.duration > 0
+                              ? (Math.max(0, seekTime) / song.duration) * 100
+                              : 0
+                          );
+                        }}
+                        className={cn(
+                          "w-full max-w-3xl text-center px-4 transition-all duration-300 ease-out origin-center cursor-pointer",
+                          isActive
+                            ? "text-3xl md:text-4xl font-extrabold text-white scale-110 drop-shadow-lg"
+                            : isPast
+                            ? "text-xl md:text-2xl font-bold text-white/40 hover:text-white/60"
+                            : "text-xl md:text-2xl font-bold text-white/20 hover:text-white/50"
+                        )}
+                      >
+                        {line.text || "♪"}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : lyrics?.plain ? (
+                <div className="flex flex-col items-center py-20">
+                  <span className="mb-8 rounded bg-white/10 px-3 py-1 text-xs font-bold uppercase tracking-widest text-white/50">
+                    Plain Text Lyrics
+                  </span>
+                  {lyrics.plain.split("\n").map((line, idx) => (
+                    <p key={idx} className="mb-4 text-center text-lg font-medium text-white/80">
+                      {line || "\u00A0"}
+                    </p>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex h-full flex-col items-center justify-center gap-4 text-white/50">
+                  <p>No lyrics found for this song.</p>
+                  <button
+                    onClick={loadSongLyrics}
+                    className="flex items-center gap-2 rounded-full border border-white/20 px-4 py-2 text-sm hover:bg-white/10 hover:text-white"
+                  >
+                    <RefreshCw className="h-4 w-4" /> Retry
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Bottom Player Controls */}
+      <div className="relative z-10 w-full bg-black/20 px-8 pt-4 pb-8 backdrop-blur-md">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+          {/* Metadata */}
+          <div className="flex flex-col items-center text-center">
+            <h2 className="truncate text-2xl font-bold text-white max-w-full">
               {song.title}
             </h2>
-            <p className="mt-1 truncate text-sm text-white/50">
-              {song.artist}{song.album ? ` · ${song.album}` : ""}
+            <p className="mt-1 truncate text-sm font-medium text-white/60 max-w-full">
+              {song.artist}
             </p>
           </div>
 
-          <div className="flex flex-col gap-2">
+          {/* Progress */}
+          <div className="flex items-center gap-4">
+            <span className="w-12 text-right text-xs font-medium text-white/50 tabular-nums">
+              {formatTime(effectiveCurrentTime)}
+            </span>
             <input
               type="range"
               min={0}
               max={100}
+              step={0.1}
               value={progress}
               onChange={(e) => onSeek(Number(e.target.value))}
-              className="w-full"
+              className="flex-1"
               style={{ "--progress": `${progress}%` } as React.CSSProperties}
             />
-            <div className="flex justify-between text-xs text-white/40 tabular-nums">
-              <span>{formatTime(elapsed)}</span>
-              <span>{formatTime(song.duration || 0)}</span>
-            </div>
+            <span className="w-12 text-left text-xs font-medium text-white/50 tabular-nums">
+              {formatTime(song.duration || 0)}
+            </span>
           </div>
 
-          <div className="flex items-center justify-between">
+          {/* Playback Controls */}
+          <div className="flex items-center justify-center gap-6 sm:gap-8">
             <button
               onClick={onToggleShuffle}
-              className={cn("rounded-full p-2 transition", shuffle ? "text-white" : "text-white/40 hover:text-white/70")}
+              className={cn(
+                "p-2 transition-colors",
+                shuffle ? "text-spotify-green" : "text-white/40 hover:text-white"
+              )}
             >
               <Shuffle className="h-5 w-5" />
             </button>
-            <button onClick={onPrevious} className="rounded-full p-2 text-white/70 transition hover:text-white">
-              <SkipBack className="h-7 w-7 fill-current" />
+            
+            <button onClick={onPrevious} className="p-2 text-white/70 hover:text-white transition">
+              <SkipBack className="h-8 w-8 fill-current" />
             </button>
+            
             <button
               onClick={onTogglePlay}
-              className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-black shadow-lg transition hover:scale-105 active:scale-95"
+              className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-black transition-transform hover:scale-105 active:scale-95 shadow-lg"
             >
-              {isPlaying ? <Pause className="h-7 w-7 fill-current" /> : <Play className="h-7 w-7 fill-current" />}
+              {isPlaying ? <Pause className="h-8 w-8 fill-current" /> : <Play className="h-8 w-8 fill-current ml-1" />}
             </button>
-            <button onClick={onNext} className="rounded-full p-2 text-white/70 transition hover:text-white">
-              <SkipForward className="h-7 w-7 fill-current" />
+            
+            <button onClick={onNext} className="p-2 text-white/70 hover:text-white transition">
+              <SkipForward className="h-8 w-8 fill-current" />
             </button>
+            
             <button
               onClick={onCycleRepeat}
-              className={cn("rounded-full p-2 transition", repeatMode !== "off" ? "text-white" : "text-white/40 hover:text-white/70")}
+              className={cn(
+                "p-2 transition-colors",
+                repeatMode !== "off" ? "text-spotify-green" : "text-white/40 hover:text-white"
+              )}
             >
               {repeatMode === "one" ? <Repeat1 className="h-5 w-5" /> : <Repeat className="h-5 w-5" />}
             </button>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button onClick={() => onVolumeChange(volume === 0 ? 0.7 : 0)} className="text-white/40 transition hover:text-white/70">
-              <VolumeIcon className="h-4 w-4" />
-            </button>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={volume}
-              onChange={(e) => onVolumeChange(Number(e.target.value))}
-              className="flex-1"
-              style={{ "--progress": `${volume * 100}%` } as React.CSSProperties}
-            />
           </div>
         </div>
       </div>
 
       <style>{`
         @keyframes nowPlayingSlideUp {
-          from { transform: translateY(100%); opacity: 0; }
-          to   { transform: translateY(0);    opacity: 1; }
-        }
-        @keyframes nowPlayingArtIn {
-          from { transform: scale(0.85); opacity: 0; }
-          to   { transform: scale(1);    opacity: 1; }
+          0% { transform: translateY(100%); opacity: 0; }
+          100% { transform: translateY(0); opacity: 1; }
         }
       `}</style>
     </div>

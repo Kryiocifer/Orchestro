@@ -12,6 +12,8 @@ import YouTubeView from "./components/YouTubeView";
 import ImportView from "./components/ImportView";
 import DownloadPanel, { DownloadJob } from "./components/DownloadPanel";
 import NowPlayingView from "./components/NowPlayingView";
+import EqualizerModal from "./components/EqualizerModal";
+import { equalizerEngine } from "./lib/equalizer";
 import {
   loadLibrary,
   addSongsBatch,
@@ -50,8 +52,7 @@ function App() {
   const [downloadJobs, setDownloadJobs] = useState<DownloadJob[]>([]);
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [showNowPlaying, setShowNowPlaying] = useState(false);
-
-
+  const [equalizerOpen, setEqualizerOpen] = useState(false);
   useEffect(() => {
     if (downloadJobs.some((j) => j.status === "downloading" || j.status === "queued" || j.status === "converting")) {
       setDownloadPanelOpen(true);
@@ -291,6 +292,9 @@ function App() {
     const audio = new Audio();
     audio.volume = volume;
     audioRef.current = audio;
+    
+    // Connect to Equalizer Engine
+    equalizerEngine.connectMediaElement(audio);
 
     const onTimeUpdate = () => {
       if (isSwitchingRef.current) return;
@@ -1754,6 +1758,7 @@ function App() {
           }}
           onToggleShuffle={handleToggleShuffle}
           onCycleRepeat={handleCycleRepeat}
+          onOpenEqualizer={() => setEqualizerOpen(true)}
         />
       )}
 
@@ -1779,6 +1784,12 @@ function App() {
         onRemoveFromQueue={removeFromQueue}
         onClearQueue={clearQueue}
         onSongInfoClick={currentSong ? () => setShowNowPlaying(true) : undefined}
+        onOpenEqualizer={() => setEqualizerOpen(true)}
+      />
+
+      <EqualizerModal
+        isOpen={equalizerOpen}
+        onClose={() => setEqualizerOpen(false)}
       />
     </div>
   );

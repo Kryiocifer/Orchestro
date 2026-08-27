@@ -13,6 +13,7 @@ import {
   ListMusic,
   Trash2,
   X,
+  Sliders,
 } from "lucide-react";
 import { Song } from "../lib/types";
 import { formatTime } from "../lib/utils";
@@ -39,6 +40,7 @@ interface PlayerBarProps {
   onRemoveFromQueue?: (index: number) => void;
   onClearQueue?: () => void;
   onSongInfoClick?: () => void;
+  onOpenEqualizer?: () => void;
 }
 
 export default function PlayerBar({
@@ -60,6 +62,7 @@ export default function PlayerBar({
   onRemoveFromQueue,
   onClearQueue,
   onSongInfoClick,
+  onOpenEqualizer,
 }: PlayerBarProps) {
   const [showQueue, setShowQueue] = useState(false);
   const queueMenuRef = useRef<HTMLDivElement>(null);
@@ -217,6 +220,14 @@ export default function PlayerBar({
 
       {/* Volume & Queue */}
       <div className="flex w-[30%] min-w-[120px] items-center justify-end gap-3">
+        <button
+          onClick={onOpenEqualizer}
+          className="text-spotify-lightgray transition hover:text-white"
+          title="Equalizer"
+        >
+          <Sliders className="h-5 w-5" />
+        </button>
+
         <button
           onClick={() => setShowQueue((v) => !v)}
           className={cn(
