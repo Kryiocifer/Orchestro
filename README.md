@@ -1,60 +1,66 @@
-# Orchestro 🎵
+# Orchestro
 
-A modern, ultra-lightweight, offline-first Spotify-style desktop music player and downloader built with **Tauri 2 + React + TypeScript + Rust**.
-
----
-
-## ✨ Features
-
-- **⚡ Blazing Fast & Lightweight**: Minimal RAM and CPU footprint powered by Tauri 2 and native Rust audio handling.
-- **📂 Smart Library & Subfolder Navigation**: Point to your music library folder. Browse all tracks at once or filter seamlessly by subfolder with clean navigation tabs.
-- **🎨 Immersive "Now Playing" Screen**: Click the current track in the bottom player bar to slide up a full-screen view with a dynamic blurred background, high-resolution album artwork, progress bar, and comprehensive controls.
-- **💾 Complete Session Persistence**: Automatically remembers your exact playback state across app restarts — including current song, time elapsed, queue order, volume, shuffle, and repeat modes.
-- **🗔 System Tray Integration**: Minimizes to the system tray on close with a native tray menu for instant restoration or exit, preventing accidental shutdowns during playback.
-- **📥 Spotify & YouTube Playlist Downloader**: Built-in downloader powered by `yt-dlp` and `ffmpeg`. Downloading a public Spotify playlist creates an organized folder with automatically tagged metadata and artwork.
-- **📜 Queue with "Play Next"**: Queue individual tracks or bulk selections to play immediately next without disrupting your ongoing playlist sequence.
-- **🏷️ Rich Metadata Extraction**: Automatic parsing of titles, artists, albums, durations, and embedded cover art for `.mp3`, `.flac`, `.wav`, `.ogg`, `.m4a`, and more.
-- **🎶 Playlists & Management**: Create custom playlists, right-click context menu actions, search filtering, and drag-and-drop ingestion.
-- **🔔 Refined Toast System**: Unobtrusive notifications positioned neatly above player controls.
-- **⌨️ Media Session API**: Native OS media keys and playback shortcuts support.
+Orchestro is a modern, lightweight, offline-first desktop music player and downloader. It is built utilizing Tauri 2, React, TypeScript, and Rust, providing a fast and resource-efficient experience.
 
 ---
 
-## 🚀 Getting Started
+## Features
+
+- **High Performance and Lightweight**: Maintains a minimal RAM and CPU footprint, powered by Tauri 2 and native Rust audio handling.
+- **Smart Library Navigation**: Allows users to point to their local music library folder. Browse all tracks comprehensively or filter by subfolder using the built-in navigation tabs.
+- **Immersive "Now Playing" View**: Provides a full-screen view with a dynamic blurred background, high-resolution album artwork, progress tracking, and comprehensive media controls.
+- **Session Persistence**: Automatically saves and restores the exact playback state across application restarts, including the current track, elapsed time, queue order, volume, and playback modes (shuffle and repeat).
+- **System Tray Integration**: Minimizes to the system tray on close. Features a native tray menu for instant restoration or application exit, preventing accidental interruptions during playback.
+- **Playlist Downloader**: Includes a built-in downloader powered by `yt-dlp` and `ffmpeg`. Downloading public playlists creates an organized directory with automatically tagged metadata and artwork.
+- **Advanced Queue Management**: Supports queuing individual tracks or bulk selections to play next without disrupting the current playlist sequence.
+- **Metadata Extraction**: Automatically parses titles, artists, albums, durations, and embedded cover art for various audio formats including `.mp3`, `.flac`, `.wav`, `.ogg`, and `.m4a`.
+- **Playlist Management**: Enables the creation of custom playlists, contextual actions via right-click, search filtering, and drag-and-drop support.
+- **Native Media Controls**: Integrates with the Media Session API for native operating system media keys and playback shortcuts.
+
+---
+
+## Getting Started
 
 ### Prerequisites
-- [Node.js](https://nodejs.org/) (v18 or newer)
-- [Rust](https://www.rust-lang.org/tools/install) (stable)
-- OS build dependencies (see [Tauri Prerequisites](https://v2.tauri.app/start/prerequisites/))
-- Optional for downloads: `yt-dlp` and `ffmpeg` installed on your PATH
 
-### Development
+- [Node.js](https://nodejs.org/) (v18 or newer)
+- [Rust](https://www.rust-lang.org/tools/install) (stable release)
+- Operating System build dependencies (refer to [Tauri Prerequisites](https://v2.tauri.app/start/prerequisites/))
+- Optional (for downloading functionality): `yt-dlp` and `ffmpeg` installed and available in your system PATH.
+
+### Development Environment
 
 ```bash
 # Clone the repository
 git clone https://github.com/your-username/Orchestro.git
 cd Orchestro
 
-# Install dependencies
+# Install package dependencies
 npm install
 
-# Run in development mode
+# Start the application in development mode
 npm run tauri dev
 ```
 
 ### Production Build
 
+For **Windows** and **macOS**, the standard build command securely produces the respective OS installers (NSIS/MSI for Windows, DMG/App for macOS):
+
 ```bash
 npm run tauri build
 ```
 
+*(Note: For **Linux** builds, please refer to the [Linux Installation and Building](#linux-installation-and-building) section below for the correct packaging commands.)*
+
 ---
 
-## 🐧 Linux Installation & Building (Arch / CachyOS / Ubuntu / Debian)
+## Linux Installation and Building
+
+The project is configured to build DEB, RPM, and AppImage packages on Linux.
 
 ### 1. Install System Dependencies
 
-#### Arch Linux / CachyOS:
+**Arch Linux / CachyOS:**
 ```bash
 sudo pacman -S --needed \
   webkit2gtk-4.1 \
@@ -63,10 +69,10 @@ sudo pacman -S --needed \
   appmenu-gtk-module gtk3 \
   libappindicator-gtk3 librsvg libvips \
   gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav \
-  fuse2
+  fuse2 rpm-tools patchelf
 ```
 
-#### Ubuntu / Debian:
+**Ubuntu / Debian:**
 ```bash
 sudo apt update
 sudo apt install -y \
@@ -81,61 +87,67 @@ sudo apt install -y \
   gstreamer1.0-plugins-good \
   gstreamer1.0-plugins-bad \
   gstreamer1.0-plugins-ugly \
-  gstreamer1.0-libav
+  gstreamer1.0-libav \
+  patchelf rpm
 ```
 
-### 2. Building AppImage / Debian Bundles
+### 2. Building Packages
 
-To properly build the `.AppImage` on Linux without library stripping issues:
+The `package.json` contains dedicated scripts that handle specific environment variables required for proper Linux bundling (e.g., preventing library stripping issues).
 
 ```bash
+# Build all Linux targets (DEB, RPM, and AppImage)
 npm run build:linux
-# or
-NO_STRIP=1 APPIMAGE_EXTRACT_AND_RUN=1 npm run tauri build
+
+# Build specific targets individually
+npm run build:deb
+npm run build:rpm
+npm run build:appimage
 ```
 
-Artifacts will be located at:
+Artifacts will be output to the following locations:
 - **Native Binary:** `src-tauri/target/release/orchestro`
 - **AppImage:** `src-tauri/target/release/bundle/appimage/Orchestro_*.AppImage`
 - **Debian Package:** `src-tauri/target/release/bundle/deb/Orchestro_*.deb`
+- **RPM Package:** `src-tauri/target/release/bundle/rpm/Orchestro-*.rpm`
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
-```
+```text
 Orchestro/
-├── src/                         # React Frontend
+├── src/                         # React Frontend Interface
 │   ├── components/
 │   │   ├── ContextMenu.tsx      # Right-click context actions
-│   │   ├── DownloadPanel.tsx    # Live download queue & progress
-│   │   ├── HomeView.tsx         # Quick access & recently played
-│   │   ├── ImportView.tsx       # Spotify & YouTube playlist importer
-│   │   ├── LibraryView.tsx      # Filterable song library & folder tabs
+│   │   ├── DownloadPanel.tsx    # Live download queue and progress tracking
+│   │   ├── HomeView.tsx         # Quick access and recently played tracks
+│   │   ├── ImportView.tsx       # Spotify and YouTube playlist importer
+│   │   ├── LibraryView.tsx      # Filterable song library and folder tabs
 │   │   ├── NowPlayingView.tsx   # Full-screen immersive player view
 │   │   ├── PlayerBar.tsx        # Persistent bottom player controls
-│   │   ├── PlaylistView.tsx     # Custom playlists & track listings
-│   │   ├── Sidebar.tsx          # Navigation & library links
-│   │   └── YouTubeView.tsx      # In-app YouTube search & streaming
+│   │   ├── PlaylistView.tsx     # Custom playlists and track listings
+│   │   ├── Sidebar.tsx          # Navigation and library links
+│   │   └── YouTubeView.tsx      # In-app YouTube search and streaming
 │   ├── lib/
-│   │   ├── library.ts           # Storage, scanning & metadata parsing
-│   │   ├── types.ts             # TypeScript interfaces & types
-│   │   └── utils.ts             # Formatting & helper utilities
-│   ├── styles/                  # Tailwind CSS & global styles
-│   ├── App.tsx                  # Main application container & state orchestration
-│   └── main.tsx                 # React entry point & toast configuration
+│   │   ├── library.ts           # Storage, scanning, and metadata parsing logic
+│   │   ├── types.ts             # TypeScript interfaces and type definitions
+│   │   └── utils.ts             # Formatting and helper utilities
+│   ├── styles/                  # Tailwind CSS and global style definitions
+│   ├── App.tsx                  # Main application container and state orchestration
+│   └── main.tsx                 # React entry point and toast configuration
 ├── src-tauri/                   # Rust Backend
 │   ├── src/
-│   │   ├── main.rs              # Application entry
-│   │   └── lib.rs               # Commands (audio streaming, yt-dlp, tray, fs)
-│   ├── Cargo.toml               # Rust dependencies & metadata
-│   └── tauri.conf.json          # Tauri v2 configuration & window settings
-├── package.json
-└── vite.config.ts
+│   │   ├── main.rs              # Application entry point
+│   │   └── lib.rs               # Commands (audio streaming, yt-dlp, tray, file system)
+│   ├── Cargo.toml               # Rust dependencies and metadata
+│   └── tauri.conf.json          # Tauri v2 configuration and window settings
+├── package.json                 # Node dependencies and build scripts
+└── vite.config.ts               # Vite configuration
 ```
 
 ---
 
-## 📄 License
+## License
 
-MIT License. Crafted for clean, distraction-free local listening.
+MIT License.
