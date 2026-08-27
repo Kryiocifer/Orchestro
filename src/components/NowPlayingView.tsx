@@ -300,10 +300,6 @@ export default function NowPlayingView({
           </div>
         ) : (
           <div className="relative flex h-full w-full flex-col items-center">
-            {/* Top/Bottom Fade Overlays to replace mask-image */}
-            <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-[#121212]/80 to-transparent pointer-events-none z-10" />
-            <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-[#121212]/80 to-transparent pointer-events-none z-10" />
-
             {/* The Scrollable Lyrics Container */}
             <div
               ref={lyricsContainerRef}

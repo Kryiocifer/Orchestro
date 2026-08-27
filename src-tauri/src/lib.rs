@@ -1822,6 +1822,9 @@ async fn yt_download(
     url: String,
     output_dir: String,
     job_id: String,
+    title: Option<String>,
+    artist: Option<String>,
+    cover_url: Option<String>,
 ) -> Result<String, String> {
     if url.trim().is_empty() {
         return Err("Empty URL".into());
@@ -1845,6 +1848,9 @@ async fn yt_download(
     let out_template2 = out_template.clone();
     let dir2 = dir.clone();
     let bin2 = bin.clone();
+    let title2 = title.clone();
+    let artist2 = artist.clone();
+    let cover_url2 = cover_url.clone();
 
     let result = tokio::task::spawn_blocking(move || {
         // Tell UI we're starting immediately
@@ -2009,6 +2015,39 @@ async fn yt_download(
                 .ok_or_else(|| "Download finished but file not found".to_string())?
         };
 
+        // ====== APPLY ID3 TAGS ======
+        if let Some(t) = &title2 {
+            if let Ok(mut tag) = id3::Tag::read_from_path(&final_path).or_else(|_| Ok(id3::Tag::new())) {
+                tag.set_title(t);
+                if let Some(a) = &artist2 {
+                    tag.set_artist(a);
+                }
+                
+                // Embed cover art if provided
+                if let Some(curl) = &cover_url2 {
+                    if let Ok(resp) = reqwest::blocking::get(curl) {
+                        if let Ok(bytes) = resp.bytes() {
+                            if let Ok(img) = image::load_from_memory(&bytes) {
+                                let mut jpeg_bytes = Vec::new();
+                                let mut cursor = std::io::Cursor::new(&mut jpeg_bytes);
+                                if img.write_to(&mut cursor, image::ImageOutputFormat::Jpeg(90)).is_ok() {
+                                    tag.add_frame(id3::frame::Picture {
+                                        mime_type: "image/jpeg".to_string(),
+                                        picture_type: id3::frame::PictureType::CoverFront,
+                                        description: "Cover".to_string(),
+                                        data: jpeg_bytes,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                let _ = tag.write_to_path(&final_path, id3::Version::Id3v24);
+            }
+        }
+        // ==============================
+
         let _ = app2.emit(
             "yt-download-progress",
             YtProgressEvent {
@@ -2070,7 +2109,8 @@ pub fn run() {
             spotify_liked_songs,
             resolve_spotify_album,
             resolve_spotify_link,
-            parse_track_list_text
+            parse_track_list_text,
+            download_ffmpeg
         ])
         .setup(|app| {
             let app_data = app.path().app_data_dir().expect("failed to get app data dir");
@@ -2134,4 +2174,35 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[tauri::command]
+async fn download_ffmpeg(app: AppHandle) -> Result<String, String> {
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let bin_dir = app_data.join("bin");
+    std::fs::create_dir_all(&bin_dir).ok();
+
+    let ffmpeg_url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip";
+    
+    let resp = reqwest::get(ffmpeg_url)
+        .await
+        .map_err(|e| format!("Failed to download FFmpeg: {}", e))?;
+    
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    let reader = std::io::Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(reader).map_err(|e| e.to_string())?;
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        if let Some(name) = file.enclosed_name() {
+            if name.file_name().and_then(|n| n.to_str()) == Some("ffmpeg.exe") {
+                let outpath = bin_dir.join("ffmpeg.exe");
+                let mut outfile = std::fs::File::create(&outpath).map_err(|e| e.to_string())?;
+                std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
+                return Ok(outpath.to_string_lossy().to_string());
+            }
+        }
+    }
+    
+    Err("Could not find ffmpeg.exe inside the downloaded zip".into())
 }

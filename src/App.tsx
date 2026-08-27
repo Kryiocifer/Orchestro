@@ -1240,6 +1240,9 @@ function App() {
           url,
           outputDir: folder,
           jobId: next.id,
+          title: next.title,
+          artist: next.artist,
+          coverUrl: next.coverUrl,
         });
 
         // Fast path: add to library without spamming toasts on bulk imports

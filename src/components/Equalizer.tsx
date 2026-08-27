@@ -6,6 +6,7 @@ import {
   EQBand,
   EQEngine,
   equalizerEngine,
+  EQ_BAND_LABELS,
 } from "../lib/equalizer";
 import { cn } from "../lib/utils";
 
@@ -18,13 +19,20 @@ export const Equalizer: React.FC<EqualizerProps> = ({
   audioElement,
   engine,
 }) => {
-  const [genreId, setGenreId] = useState("flat");
-  const [deviceId, setDeviceId] = useState("speakers");
-  const [bands, setBands] = useState<EQBand[]>(FLAT_BANDS);
-  const [preamp, setPreamp] = useState(0);
-  const [enabled, setEnabled] = useState(true);
-
   const engineRef = useRef<EQEngine>(engine ?? equalizerEngine);
+  
+  const [genreId, setGenreId] = useState(() => engineRef.current.getSettings().genreId || "flat");
+  const [deviceId, setDeviceId] = useState(() => engineRef.current.getSettings().deviceId || "speakers");
+  const [bands, setBands] = useState<EQBand[]>(() => {
+    const s = engineRef.current.getSettings();
+    if (s.isCustom) {
+      return FLAT_BANDS.map((b, i) => ({ ...b, gain: s.musicGains[i] || 0 }));
+    }
+    const preset = GENRE_PRESETS.find(p => p.id === s.genreId) || GENRE_PRESETS[0];
+    return preset.bands;
+  });
+  const [preamp, setPreamp] = useState(() => engineRef.current.getSettings().preamp || 0);
+  const [enabled, setEnabled] = useState(() => engineRef.current.getSettings().enabled ?? true);
 
   useEffect(() => {
     if (audioElement) {
@@ -32,23 +40,27 @@ export const Equalizer: React.FC<EqualizerProps> = ({
     }
   }, [audioElement]);
 
-  useEffect(() => {
-    const genre = GENRE_PRESETS.find((p) => p.id === genreId) ?? GENRE_PRESETS[0];
+  const handleGenreChange = (newGenreId: string) => {
+    setGenreId(newGenreId);
+    const genre = GENRE_PRESETS.find((p) => p.id === newGenreId) ?? GENRE_PRESETS[0];
     setBands(genre.bands);
-    engineRef.current.setGenre(genreId);
-  }, [genreId]);
+    engineRef.current.setGenre(newGenreId);
+  };
 
-  useEffect(() => {
-    engineRef.current.setDevice(deviceId);
-  }, [deviceId]);
+  const handleDeviceChange = (newDeviceId: string) => {
+    setDeviceId(newDeviceId);
+    engineRef.current.setDevice(newDeviceId);
+  };
 
-  useEffect(() => {
-    engineRef.current.setPreamp(preamp);
-  }, [preamp]);
+  const handlePreampChange = (newPreamp: number) => {
+    setPreamp(newPreamp);
+    engineRef.current.setPreamp(newPreamp);
+  };
 
-  useEffect(() => {
-    engineRef.current.setEnabled(enabled);
-  }, [enabled]);
+  const handleEnabledChange = (newEnabled: boolean) => {
+    setEnabled(newEnabled);
+    engineRef.current.setEnabled(newEnabled);
+  };
 
   const handleBandChange = (index: number, gain: number) => {
     setBands((prev) => {
@@ -77,7 +89,7 @@ export const Equalizer: React.FC<EqualizerProps> = ({
           <input
             type="checkbox"
             checked={enabled}
-            onChange={(e) => setEnabled(e.target.checked)}
+            onChange={(e) => handleEnabledChange(e.target.checked)}
             className="accent-spotify-green"
           />
           Enabled
@@ -93,7 +105,7 @@ export const Equalizer: React.FC<EqualizerProps> = ({
           <select
             value={genreId}
             disabled={!enabled}
-            onChange={(e) => setGenreId(e.target.value)}
+            onChange={(e) => handleGenreChange(e.target.value)}
             className="w-full rounded-lg border border-[#333] bg-[#181818] px-3 py-2 text-xs text-white outline-none focus:border-spotify-green disabled:opacity-40"
           >
             {GENRE_PRESETS.map((p) => (
@@ -108,7 +120,7 @@ export const Equalizer: React.FC<EqualizerProps> = ({
           <select
             value={deviceId}
             disabled={!enabled}
-            onChange={(e) => setDeviceId(e.target.value)}
+            onChange={(e) => handleDeviceChange(e.target.value)}
             className="w-full rounded-lg border border-[#333] bg-[#181818] px-3 py-2 text-xs text-white outline-none focus:border-spotify-green disabled:opacity-40"
           >
             {DEVICE_PRESETS.map((p) => (
@@ -165,7 +177,7 @@ export const Equalizer: React.FC<EqualizerProps> = ({
             step={0.5}
             value={preamp}
             disabled={!enabled}
-            onChange={(e) => setPreamp(parseFloat(e.target.value))}
+            onChange={(e) => handlePreampChange(parseFloat(e.target.value))}
             className="w-28 accent-spotify-green"
             style={{ "--progress": `${((preamp + 12) / 24) * 100}%` } as React.CSSProperties}
           />

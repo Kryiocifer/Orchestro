@@ -49,6 +49,7 @@ export default function YouTubeView({
   } | null>(null);
   const [updatingYtdlp, setUpdatingYtdlp] = useState(false);
   const [updatePercent, setUpdatePercent] = useState(0);
+  const [downloadingFfmpeg, setDownloadingFfmpeg] = useState(false);
   const [online, setOnline] = useState(
     typeof navigator !== "undefined" ? navigator.onLine : true
   );
@@ -131,6 +132,22 @@ export default function YouTubeView({
     } finally {
       setUpdatingYtdlp(false);
       setUpdatePercent(0);
+    }
+  };
+
+  const handleDownloadFfmpeg = async () => {
+    if (downloadingFfmpeg) return;
+    setDownloadingFfmpeg(true);
+    toast.loading("Downloading FFmpeg...");
+    try {
+      await invoke("download_ffmpeg");
+      toast.dismiss();
+      toast.success("FFmpeg downloaded successfully!");
+    } catch (e) {
+      toast.dismiss();
+      toast.error(String(e));
+    } finally {
+      setDownloadingFfmpeg(false);
     }
   };
 
@@ -325,6 +342,14 @@ export default function YouTubeView({
             </button>
           </div>
         )}
+        
+        <button
+          onClick={handleDownloadFfmpeg}
+          disabled={downloadingFfmpeg}
+          className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white transition hover:bg-white/20 disabled:opacity-50"
+        >
+          {downloadingFfmpeg ? "Downloading FFmpeg..." : "Download FFmpeg"}
+        </button>
       </div>
 
       <form onSubmit={handleSearch} className="mb-6 flex gap-2">

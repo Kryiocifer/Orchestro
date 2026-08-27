@@ -5,6 +5,8 @@ import { cn } from "../lib/utils";
 export interface DownloadJob {
   id: string;
   title: string;
+  artist?: string;
+  coverUrl?: string;
   percent: number;
   status: "queued" | "downloading" | "converting" | "done" | "error" | "cancelled";
   message?: string;
