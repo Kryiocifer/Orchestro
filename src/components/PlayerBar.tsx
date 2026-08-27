@@ -23,6 +23,7 @@ export type RepeatMode = "off" | "all" | "one";
 
 interface PlayerBarProps {
   currentSong: Song | null;
+  coverUrl?: string | null;
   isPlaying: boolean;
   progress: number;
   volume: number;
@@ -45,6 +46,7 @@ interface PlayerBarProps {
 
 export default function PlayerBar({
   currentSong,
+  coverUrl,
   isPlaying,
   progress,
   volume,
@@ -100,9 +102,9 @@ export default function PlayerBar({
             style={{ cursor: onSongInfoClick ? "pointer" : "default" }}
           >
             <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded bg-spotify-gray">
-              {currentSong.cover ? (
+              {coverUrl || currentSong.cover ? (
                 <img
-                  src={currentSong.cover}
+                  src={coverUrl || currentSong.cover}
                   alt=""
                   className="h-full w-full object-cover"
                 />

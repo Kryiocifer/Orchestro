@@ -27,6 +27,7 @@ import {
 
 interface NowPlayingViewProps {
   song: Song;
+  coverUrl?: string | null;
   isPlaying: boolean;
   progress: number;
   currentTime?: number;
@@ -46,6 +47,7 @@ interface NowPlayingViewProps {
 
 export default function NowPlayingView({
   song,
+  coverUrl,
   isPlaying,
   progress,
   currentTime,
@@ -170,18 +172,18 @@ export default function NowPlayingView({
     >
       {/* Background layer */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {song.cover ? (
+        {coverUrl || song.cover ? (
           <>
             <img
-              src={song.cover}
+              src={coverUrl || song.cover}
               alt=""
-              className="absolute inset-0 h-full w-full scale-110 object-cover"
+              className="absolute inset-0 h-full w-full scale-110 object-cover transition-all duration-700"
               style={{ filter: "blur(70px) brightness(0.3) saturate(1.2)" }}
             />
             <div className="absolute inset-0 bg-black/40" />
           </>
         ) : (
-          <div className="absolute inset-0 bg-gradient-to-b from-[#1a1a2e] to-[#0f3460] opacity-80" />
+          <div className="absolute inset-0 bg-gradient-to-b from-[#1a1a2e] to-[#0f3460] opacity-80 transition-all duration-700" />
         )}
       </div>
 
@@ -291,8 +293,8 @@ export default function NowPlayingView({
         {viewMode === "artwork" ? (
           <div className="flex h-full w-full items-center justify-center p-8">
             <div className="aspect-square w-full max-w-sm overflow-hidden rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
-              {song.cover ? (
-                <img src={song.cover} alt={song.title} className="h-full w-full object-cover" />
+              {coverUrl || song.cover ? (
+                <img src={coverUrl || song.cover} alt={song.title} className="h-full w-full object-cover transition-opacity duration-500" />
               ) : (
                 <div className="flex h-full w-full items-center justify-center bg-[#282828] text-6xl">🎵</div>
               )}

@@ -1,4 +1,5 @@
 use futures_util::StreamExt;
+use id3::TagLike;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -2017,34 +2018,27 @@ async fn yt_download(
 
         // ====== APPLY ID3 TAGS ======
         if let Some(t) = &title2 {
-            if let Ok(mut tag) = id3::Tag::read_from_path(&final_path).or_else(|_| Ok(id3::Tag::new())) {
-                tag.set_title(t);
-                if let Some(a) = &artist2 {
-                    tag.set_artist(a);
-                }
-                
-                // Embed cover art if provided
-                if let Some(curl) = &cover_url2 {
-                    if let Ok(resp) = reqwest::blocking::get(curl) {
-                        if let Ok(bytes) = resp.bytes() {
-                            if let Ok(img) = image::load_from_memory(&bytes) {
-                                let mut jpeg_bytes = Vec::new();
-                                let mut cursor = std::io::Cursor::new(&mut jpeg_bytes);
-                                if img.write_to(&mut cursor, image::ImageOutputFormat::Jpeg(90)).is_ok() {
-                                    tag.add_frame(id3::frame::Picture {
-                                        mime_type: "image/jpeg".to_string(),
-                                        picture_type: id3::frame::PictureType::CoverFront,
-                                        description: "Cover".to_string(),
-                                        data: jpeg_bytes,
-                                    });
-                                }
-                            }
-                        }
+            let mut tag = id3::Tag::read_from_path(&final_path).unwrap_or_else(|_| id3::Tag::new());
+            tag.set_title(t);
+            if let Some(a) = &artist2 {
+                tag.set_artist(a);
+            }
+
+            if let Some(c) = &cover_url2 {
+                if let Ok(resp) = reqwest::blocking::get(c) {
+                    if let Ok(bytes) = resp.bytes() {
+                        let mime = if c.ends_with(".png") { "image/png" } else { "image/jpeg" };
+                        tag.add_frame(id3::frame::Picture {
+                            mime_type: mime.to_string(),
+                            picture_type: id3::frame::PictureType::CoverFront,
+                            description: "Cover".to_string(),
+                            data: bytes.to_vec(),
+                        });
                     }
                 }
-                
-                let _ = tag.write_to_path(&final_path, id3::Version::Id3v24);
             }
+
+            let _ = tag.write_to_path(&final_path, id3::Version::Id3v24);
         }
         // ==============================
 
@@ -2110,7 +2104,8 @@ pub fn run() {
             resolve_spotify_album,
             resolve_spotify_link,
             parse_track_list_text,
-            download_ffmpeg
+            download_ffmpeg,
+            get_song_cover
         ])
         .setup(|app| {
             let app_data = app.path().app_data_dir().expect("failed to get app data dir");
@@ -2204,5 +2199,22 @@ async fn download_ffmpeg(app: AppHandle) -> Result<String, String> {
         }
     }
     
-    Err("Could not find ffmpeg.exe inside the downloaded zip".into())
+    Err("Could not find ffmpeg.exe in the downloaded archive".into())
+}
+
+#[tauri::command]
+async fn get_song_cover(path: String) -> Result<Option<String>, String> {
+    use base64::{Engine as _, engine::general_purpose};
+    
+    let tag = match id3::Tag::read_from_path(&path) {
+        Ok(t) => t,
+        Err(_) => return Ok(None)
+    };
+
+    if let Some(pic) = tag.pictures().next() {
+        let b64 = general_purpose::STANDARD.encode(&pic.data);
+        return Ok(Some(format!("data:{};base64,{}", pic.mime_type, b64)));
+    }
+    
+    Ok(None)
 }

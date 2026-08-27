@@ -43,6 +43,7 @@ function App() {
   const [currentView, setCurrentView] = useState<View>("home");
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
+  const [currentCoverUrl, setCurrentCoverUrl] = useState<string | null>(null);
   const [queue, setQueue] = useState<Song[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -194,6 +195,23 @@ function App() {
   useEffect(() => {
     repeatRef.current = repeatMode;
   }, [repeatMode]);
+
+  useEffect(() => {
+    if (!currentSong) {
+      setCurrentCoverUrl(null);
+      return;
+    }
+    let active = true;
+    invoke<string | null>("get_song_cover", { path: currentSong.path })
+      .then((b64) => {
+        if (active && b64) setCurrentCoverUrl(b64);
+        else if (active) setCurrentCoverUrl(null);
+      })
+      .catch(() => {
+        if (active) setCurrentCoverUrl(null);
+      });
+    return () => { active = false; };
+  }, [currentSong]);
 
   // Load library on mount — drop missing files, strip duplicates, restore session
   useEffect(() => {
@@ -1745,6 +1763,7 @@ function App() {
       {showNowPlaying && currentSong && (
         <NowPlayingView
           song={currentSong}
+          coverUrl={currentCoverUrl}
           isPlaying={isPlaying}
           progress={progress}
           volume={volume}
@@ -1767,6 +1786,7 @@ function App() {
 
       <PlayerBar
         currentSong={currentSong}
+        coverUrl={currentCoverUrl}
         isPlaying={isPlaying}
         progress={progress}
         volume={volume}
