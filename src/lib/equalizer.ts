@@ -302,6 +302,21 @@ export class EQEngine {
     }
   }
 
+  public initContext() {
+    try {
+      const AudioCtxClass =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtxClass) return;
+      if (!this.audioCtx) {
+        this.audioCtx = new AudioCtxClass();
+      }
+      this.ensureContextRunning();
+    } catch (e) {
+      console.warn("Could not init AudioContext:", e);
+    }
+  }
+
   public connectMediaElement(audioEl: HTMLAudioElement) {
     this.attach(audioEl);
   }

@@ -415,6 +415,9 @@ function App() {
   const loadAndPlay = useCallback(
     async (song: Song, newQueue?: Song[], startTime: number = 0) => {
       if (!audioRef.current) return;
+      
+      // Initialize/resume AudioContext synchronously here to capture the user gesture token
+      equalizerEngine.initContext();
 
       const audio = audioRef.current;
       const gen = ++playGenRef.current;

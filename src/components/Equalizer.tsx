@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { ChevronDown, Check } from "lucide-react";
 import {
   GENRE_PRESETS,
   DEVICE_PRESETS,
@@ -6,7 +7,6 @@ import {
   EQBand,
   EQEngine,
   equalizerEngine,
-  EQ_BAND_LABELS,
 } from "../lib/equalizer";
 import { cn } from "../lib/utils";
 
@@ -14,6 +14,71 @@ interface EqualizerProps {
   audioElement?: HTMLAudioElement;
   engine?: EQEngine;
 }
+
+const CustomSelect: React.FC<{
+  value: string;
+  options: { id: string; name: string }[];
+  onChange: (val: string) => void;
+  disabled?: boolean;
+}> = ({ value, options, onChange, disabled }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isOpen]);
+
+  const selected = options.find((o) => o.id === value);
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <button
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+        disabled={disabled}
+        className={cn(
+          "flex w-full items-center justify-between rounded-lg border px-3 py-2 text-xs outline-none transition-colors",
+          isOpen ? "border-spotify-green bg-[#222]" : "border-[#333] bg-[#181818]",
+          !disabled && !isOpen && "hover:border-[#555] hover:bg-[#222]",
+          disabled ? "opacity-40 cursor-not-allowed text-white" : "cursor-pointer text-white"
+        )}
+      >
+        <span className="truncate">{selected?.name ?? "Select"}</span>
+        <ChevronDown size={14} className={cn("text-spotify-lightgray transition-transform", isOpen && "rotate-180")} />
+      </button>
+
+      {isOpen && !disabled && (
+        <div className="absolute z-50 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-[#333] bg-[#282828] py-1 shadow-xl sidebar-scroll">
+          {options.map((opt) => (
+            <button
+              key={opt.id}
+              onClick={() => {
+                onChange(opt.id);
+                setIsOpen(false);
+              }}
+              className={cn(
+                "flex w-full items-center justify-between px-3 py-2 text-left text-xs transition-colors cursor-pointer",
+                value === opt.id 
+                  ? "bg-white/10 text-spotify-green" 
+                  : "text-spotify-lightgray hover:bg-white/5 hover:text-white"
+              )}
+            >
+              <span className="truncate">{opt.name}</span>
+              {value === opt.id && <Check size={14} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const Equalizer: React.FC<EqualizerProps> = ({
   audioElement,
@@ -102,31 +167,23 @@ export const Equalizer: React.FC<EqualizerProps> = ({
           <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-spotify-lightgray/80">
             Music Tone Preset
           </p>
-          <select
+          <CustomSelect
             value={genreId}
+            options={GENRE_PRESETS}
             disabled={!enabled}
-            onChange={(e) => handleGenreChange(e.target.value)}
-            className="w-full rounded-lg border border-[#333] bg-[#181818] px-3 py-2 text-xs text-white outline-none focus:border-spotify-green disabled:opacity-40"
-          >
-            {GENRE_PRESETS.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
+            onChange={handleGenreChange}
+          />
         </div>
         <div>
           <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-spotify-lightgray/80">
             Hardware Profile
           </p>
-          <select
+          <CustomSelect
             value={deviceId}
+            options={DEVICE_PRESETS}
             disabled={!enabled}
-            onChange={(e) => handleDeviceChange(e.target.value)}
-            className="w-full rounded-lg border border-[#333] bg-[#181818] px-3 py-2 text-xs text-white outline-none focus:border-spotify-green disabled:opacity-40"
-          >
-            {DEVICE_PRESETS.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
+            onChange={handleDeviceChange}
+          />
         </div>
       </div>
 
