@@ -144,6 +144,7 @@ fn resolve_ytdlp(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn read_version(bin: &Path) -> Option<String> {
     let mut c = Command::new(bin);
+    c.env_remove("PYTHONHOME").env_remove("PYTHONPATH").env_remove("LD_LIBRARY_PATH");
     hide_console(&mut c);
     let output = c.arg("--version").output().ok()?;
     if !output.status.success() {
@@ -1758,6 +1759,7 @@ async fn yt_search(app: AppHandle, query: String) -> Result<Vec<YtSearchResult>,
     let bin = resolve_ytdlp(&app)?;
     let search = format!("ytsearch8:{}", q);
     let mut cmd = tokio::process::Command::new(&bin);
+    cmd.env_remove("PYTHONHOME").env_remove("PYTHONPATH").env_remove("LD_LIBRARY_PATH");
     hide_console_tokio(&mut cmd);
     let output = cmd
         .args([
@@ -1866,6 +1868,7 @@ async fn yt_download(
         );
 
         let mut child_cmd = Command::new(&bin2);
+        child_cmd.env_remove("PYTHONHOME").env_remove("PYTHONPATH").env_remove("LD_LIBRARY_PATH");
         hide_console(&mut child_cmd);
         let mut child = child_cmd
             .args([
