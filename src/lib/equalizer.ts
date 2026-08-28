@@ -216,6 +216,13 @@ export class EQEngine {
       return;
     }
 
+    // WebKitGTK (Linux) has a bug where MediaElementAudioSourceNode mutes data: URIs
+    // on custom protocol schemes (like tauri://). We must bypass the Web Audio graph.
+    if (window.location.protocol === "tauri:") {
+      console.warn("Equalizer bypassed: WebKitGTK Web Audio is incompatible with tauri:// data URIs.");
+      return;
+    }
+
     try {
       const AudioCtxClass =
         window.AudioContext ||
