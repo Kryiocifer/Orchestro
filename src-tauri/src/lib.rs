@@ -1874,6 +1874,8 @@ async fn yt_download(
                 "mp3",
                 "--audio-quality",
                 "5", // faster encode than 0 (best)
+                "--embed-metadata",
+                "--embed-thumbnail",
                 "--no-playlist",
                 "--no-warnings",
                 "--newline",

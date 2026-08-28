@@ -69,6 +69,20 @@ export default function NowPlayingView({
   const [lyricOffset, setLyricOffset] = useState<number>(() => getLyricOffset(song.id));
   const [showOffsetControls, setShowOffsetControls] = useState(false);
 
+  const offsetControlsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (offsetControlsRef.current && !offsetControlsRef.current.contains(e.target as Node)) {
+        setShowOffsetControls(false);
+      }
+    };
+    if (showOffsetControls) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showOffsetControls]);
+
   const scrollTimeoutRef = useRef<number | null>(null);
   const activeLineRef = useRef<HTMLButtonElement | null>(null);
   const lyricsContainerRef = useRef<HTMLDivElement>(null);
@@ -152,16 +166,39 @@ export default function NowPlayingView({
       return;
     }
     
-    // Using standard scrollIntoView API
-    try {
-      activeLineRef.current.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
-    } catch (e) {
-      console.error("Scroll to lyric failed", e);
+    // Custom smooth scroll to bypass jagged/instant native WebKitGTK scrolling
+    if (activeLineRef.current && lyricsContainerRef.current) {
+      const container = lyricsContainerRef.current;
+      const el = activeLineRef.current;
+      const targetY = el.offsetTop - container.clientHeight / 2 + el.clientHeight / 2;
+      
+      const startY = container.scrollTop;
+      const difference = targetY - startY;
+      const startTime = performance.now();
+      const duration = 600; // ms
+
+      const step = (currentTime: number) => {
+        // If user interacted during the animation, abort
+        if (userIsScrolling) return;
+
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // easeInOutCubic
+        const ease = progress < 0.5 
+          ? 4 * progress * progress * progress 
+          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+        container.scrollTop = startY + difference * ease;
+
+        if (progress < 1) {
+          requestAnimationFrame(step);
+        }
+      };
+
+      requestAnimationFrame(step);
     }
-  }, [activeLyricIndex, viewMode, userIsScrolling]);
+  }, [activeLyricIndex, viewMode]); // Intentionally removed userIsScrolling to prevent immediate abort on trigger
 
   return (
     <div
@@ -223,6 +260,7 @@ export default function NowPlayingView({
         <div className="flex items-center gap-2">
           {viewMode === "lyrics" && lyrics && (
             <button
+              onMouseDown={(e) => e.stopPropagation()}
               onClick={() => setShowOffsetControls((v) => !v)}
               className={cn(
                 "flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold transition",
@@ -255,10 +293,9 @@ export default function NowPlayingView({
       {/* Sync popover */}
       {viewMode === "lyrics" && showOffsetControls && (
         <div className="relative z-20 flex w-full justify-end px-8">
-          <div className="absolute top-2 w-72 rounded-xl bg-[#282828] p-4 shadow-2xl border border-white/10">
+          <div ref={offsetControlsRef} className="absolute top-2 w-72 rounded-xl bg-[#282828] p-4 shadow-2xl border border-white/10">
             <div className="flex justify-between items-center text-xs mb-3">
               <span className="font-semibold text-white/80">Lyrics Offset</span>
-              <span className="text-spotify-green font-mono">{lyricOffset.toFixed(1)}s</span>
             </div>
             <input
               type="range"
@@ -269,11 +306,13 @@ export default function NowPlayingView({
               onChange={(e) => {
                 const val = Number(e.target.value);
                 setLyricOffset(val);
-                saveLyricOffset(song.id, val);
               }}
-              className="w-full accent-spotify-green mb-3"
+              onPointerUp={() => {
+                saveLyricOffset(song.id, lyricOffset);
+              }}
+              className="w-full accent-spotify-green mb-3 cursor-pointer"
             />
-            <div className="flex justify-between">
+            <div className="flex justify-between items-center mt-1">
               <button
                 onClick={() => {
                   setLyricOffset(0);
@@ -283,6 +322,28 @@ export default function NowPlayingView({
               >
                 <RotateCcw className="h-3 w-3" /> Reset
               </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const val = Math.max(-15, lyricOffset - 0.5);
+                    setLyricOffset(val);
+                    saveLyricOffset(song.id, val);
+                  }}
+                  className="rounded bg-white/10 px-2 py-1 text-xs font-medium text-white transition hover:bg-white/20"
+                >
+                  -0.5s
+                </button>
+                <button
+                  onClick={() => {
+                    const val = Math.min(15, lyricOffset + 0.5);
+                    setLyricOffset(val);
+                    saveLyricOffset(song.id, val);
+                  }}
+                  className="rounded bg-white/10 px-2 py-1 text-xs font-medium text-white transition hover:bg-white/20"
+                >
+                  +0.5s
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -339,12 +400,13 @@ export default function NowPlayingView({
                           );
                         }}
                         className={cn(
-                          "w-full max-w-3xl text-center px-4 transition-all duration-300 ease-out origin-center cursor-pointer",
+                          "w-full max-w-4xl text-center px-4 transition-all duration-500 ease-in-out origin-center cursor-pointer",
+                          "text-2xl md:text-4xl font-bold",
                           isActive
-                            ? "text-3xl md:text-4xl font-extrabold text-white scale-110 drop-shadow-lg"
+                            ? "text-white scale-110 drop-shadow-lg"
                             : isPast
-                            ? "text-xl md:text-2xl font-bold text-white/40 hover:text-white/60"
-                            : "text-xl md:text-2xl font-bold text-white/20 hover:text-white/50"
+                            ? "text-white/40 hover:text-white/60 scale-100"
+                            : "text-white/20 hover:text-white/50 scale-100"
                         )}
                       >
                         {line.text || "♪"}
