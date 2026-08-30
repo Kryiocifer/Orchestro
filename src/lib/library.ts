@@ -7,6 +7,7 @@ import {
   mkdir,
   copyFile,
   readFile,
+  writeFile,
   readDir,
 } from "@tauri-apps/plugin-fs";
 import { v4 as uuidv4 } from "uuid";
@@ -17,7 +18,7 @@ import { getPerfProfile } from "./performance";
 const LIBRARY_FILE = "library.json";
 
 const AUDIO_EXTENSIONS = new Set([
-  "mp3", "flac", "wav", "ogg", "m4a", "aac", "wma", "opus", "aiff", "aif",
+  "mp3", "flac", "wav", "ogg", "m4a", "mp4", "aac", "wma", "opus", "webm", "aiff", "aif",
 ]);
 
 function normalizeName(name: string): string {
@@ -678,7 +679,13 @@ export async function addSongsBatch(
     if (!alreadyManaged) {
       const destPath = await join(songsDir, file.fileName);
       try {
-        await copyFile(file.sourcePath, destPath);
+        if (file.sourcePath.startsWith("content://")) {
+          // Tauri's fs plugin can read content URIs but not copy from them directly using copyFile
+          const data = await readFile(file.sourcePath);
+          await writeFile(destPath, data);
+        } else {
+          await copyFile(file.sourcePath, destPath);
+        }
         finalPath = destPath;
       } catch (err: unknown) {
         const msg = String((err as Error)?.message || err);
@@ -688,7 +695,7 @@ export async function addSongsBatch(
         ) {
           console.warn("File locked, using original path:", file.fileName);
         } else {
-          console.warn("Copy failed, using original path:", err);
+          console.warn("Copy/read failed, using original path:", err);
         }
       }
     }
@@ -836,7 +843,7 @@ function matchKey(input: string): string {
   }
   s = s.replace(/^file:\/\/\//i, "").replace(/^file:\/\//i, "");
   s = s.split(/[/\\]/).pop() || s;
-  s = s.replace(/\.(mp3|flac|wav|ogg|m4a|aac|wma|opus|aiff|aif)$/i, "");
+  s = s.replace(/\.(mp3|flac|wav|ogg|m4a|mp4|aac|wma|opus|webm|aiff|aif)$/i, "");
   s = s.replace(/^\d{1,3}[\s.\-_]+/, "");
   s = s.replace(/\[.*?\]/g, " ");
   s = s.replace(/\(.*?official.*?\)/gi, " ");

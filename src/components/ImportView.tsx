@@ -57,7 +57,7 @@ export default function ImportView({
   const [connecting, setConnecting] = useState(false);
   const [playlists, setPlaylists] = useState<PlaylistInfo[]>([]);
   const [loadingPlaylists, setLoadingPlaylists] = useState(false);
-  const [clientIdDraft, setClientIdDraft] = useState(spotifyClientId || "");
+
   const [showClientId, setShowClientId] = useState(false);
 
   const refreshStatus = useCallback(async () => {
@@ -104,12 +104,10 @@ export default function ImportView({
   }, [result, filter]);
 
   const handleConnect = async () => {
-    const id = (clientIdDraft || spotifyClientId || "").trim();
+    const id = (spotifyClientId || "").trim();
     if (!id) {
       setShowClientId(true);
-      setError(
-        "Paste your Spotify Client ID (developer.spotify.com). No secret needed. Redirect URI: http://127.0.0.1:18925/callback"
-      );
+      setError("Please configure your Spotify Client ID in Settings first.");
       return;
     }
     setConnecting(true);
@@ -328,28 +326,10 @@ export default function ImportView({
 
       {/* Client ID setup (only shown when needed) */}
       {(showClientId || (!connected && !spotifyClientId)) && (
-        <div className="mb-4 rounded-lg border border-white/10 bg-white/5 p-4">
-          <p className="mb-1 text-sm font-medium">Spotify Client ID</p>
-          <p className="mb-3 text-xs text-spotify-lightgray">
-            Create an app at developer.spotify.com → add redirect{" "}
-            <code className="text-white">http://127.0.0.1:18925/callback</code>{" "}
-            → paste Client ID. Only needed for private playlists & liked songs.
+        <div className="mb-4 rounded-lg border border-white/10 bg-white/5 p-4 text-sm text-spotify-lightgray">
+          <p>
+            Please go to <strong>Settings</strong> to configure your Spotify Client ID for importing private playlists and liked songs.
           </p>
-          <div className="flex gap-2">
-            <input
-              value={clientIdDraft}
-              onChange={(e) => setClientIdDraft(e.target.value)}
-              placeholder="Client ID"
-              className="flex-1 rounded-lg bg-black/40 px-3 py-2 text-sm outline-none ring-1 ring-white/10 focus:ring-spotify-green"
-            />
-            <button
-              onClick={handleConnect}
-              disabled={connecting || !clientIdDraft.trim()}
-              className="rounded-lg bg-spotify-green px-4 py-2 text-sm font-semibold text-black hover:bg-spotify-green-hover disabled:opacity-40"
-            >
-              Save
-            </button>
-          </div>
         </div>
       )}
 

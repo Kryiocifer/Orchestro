@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import toast from "react-hot-toast";
 import { listen } from "@tauri-apps/api/event";
 import {
   Search,
@@ -47,9 +46,7 @@ export default function YouTubeView({
     version: string | null;
     source: string;
   } | null>(null);
-  const [updatingYtdlp, setUpdatingYtdlp] = useState(false);
-  const [updatePercent, setUpdatePercent] = useState(0);
-  const [downloadingFfmpeg, setDownloadingFfmpeg] = useState(false);
+
   const [online, setOnline] = useState(
     typeof navigator !== "undefined" ? navigator.onLine : true
   );
@@ -86,70 +83,6 @@ export default function YouTubeView({
     refreshYtdlpStatus();
   }, []);
 
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    listen<{ percent: number }>("yt-dlp-update-progress", (e) => {
-      setUpdatePercent(e.payload.percent);
-    }).then((fn) => {
-      unlisten = fn;
-    });
-    return () => unlisten?.();
-  }, []);
-
-  const handleUpdateYtdlp = async () => {
-    if (updatingYtdlp) return;
-    setUpdatingYtdlp(true);
-    setUpdatePercent(0);
-    try {
-      const s = await invoke<{
-        available: boolean;
-        version: string | null;
-        source: string;
-        action?: string | null;
-        latest_version?: string | null;
-      }>("yt_dlp_update");
-      setYtdlpStatus({
-        available: s.available,
-        version: s.version,
-        source: s.source,
-      });
-      if (s.action === "latest") {
-        toast.success(`Latest · ${s.version || ""}`.trim(), { duration: 2500 });
-      } else if (s.action === "updated") {
-        toast.success(`Updated · ${s.version || "latest"}`.trim(), {
-          duration: 2500,
-        });
-      } else if (s.action === "installed") {
-        toast.success(`Installed · ${s.version || ""}`.trim(), {
-          duration: 2500,
-        });
-      } else {
-        toast.success("yt-dlp ready");
-      }
-    } catch (err) {
-      setError(String(err));
-      toast.error("Update failed");
-    } finally {
-      setUpdatingYtdlp(false);
-      setUpdatePercent(0);
-    }
-  };
-
-  const handleDownloadFfmpeg = async () => {
-    if (downloadingFfmpeg) return;
-    setDownloadingFfmpeg(true);
-    toast.loading("Downloading FFmpeg...");
-    try {
-      await invoke("download_ffmpeg");
-      toast.dismiss();
-      toast.success("FFmpeg downloaded successfully!");
-    } catch (e) {
-      toast.dismiss();
-      toast.error(String(e));
-    } finally {
-      setDownloadingFfmpeg(false);
-    }
-  };
 
   useEffect(() => {
     const on = () => setOnline(true);
@@ -313,43 +246,9 @@ export default function YouTubeView({
         {ytdlpStatus && !ytdlpStatus.available && (
           <div className="flex flex-wrap items-center gap-2 text-sm text-amber-400">
             <AlertCircle className="h-4 w-4" />
-            yt-dlp not installed
-            <button
-              onClick={handleUpdateYtdlp}
-              disabled={updatingYtdlp}
-              className="rounded-full bg-spotify-green px-3 py-1 text-xs font-semibold text-black hover:bg-spotify-green-hover disabled:opacity-50"
-            >
-              {updatingYtdlp
-                ? `Installing ${Math.round(updatePercent)}%`
-                : "Install yt-dlp"}
-            </button>
+            yt-dlp is not installed. Please install it from Settings.
           </div>
         )}
-        {ytdlpStatus?.available && (
-          <div className="flex flex-wrap items-center gap-2 text-xs text-spotify-lightgray">
-            <span>
-              yt-dlp {ytdlpStatus.version || ""}
-              {ytdlpStatus.source === "bundled" ? " (app)" : " (system)"}
-            </span>
-            <button
-              onClick={handleUpdateYtdlp}
-              disabled={updatingYtdlp}
-              className="rounded-full bg-white/10 px-3 py-1 font-medium text-white transition hover:bg-white/20 disabled:opacity-50"
-            >
-              {updatingYtdlp
-                ? `Updating ${Math.round(updatePercent)}%`
-                : "Update yt-dlp"}
-            </button>
-          </div>
-        )}
-        
-        <button
-          onClick={handleDownloadFfmpeg}
-          disabled={downloadingFfmpeg}
-          className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white transition hover:bg-white/20 disabled:opacity-50"
-        >
-          {downloadingFfmpeg ? "Downloading FFmpeg..." : "Download FFmpeg"}
-        </button>
       </div>
 
       <form onSubmit={handleSearch} className="mb-6 flex gap-2">

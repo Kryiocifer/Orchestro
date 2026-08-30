@@ -45,6 +45,44 @@ export default function DownloadPanel({
   onCancelAll,
 }: DownloadPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  
+  const [pos, setPos] = useState({ x: window.innerWidth - 64, y: 20 });
+  const isDragging = useRef(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+  const hasDragged = useRef(false);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setPos(p => ({
+        x: Math.min(p.x, window.innerWidth - 64),
+        y: Math.min(p.y, window.innerHeight - 64)
+      }));
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest(".prevent-drag")) return;
+    isDragging.current = true;
+    hasDragged.current = false;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragStart.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging.current) return;
+    hasDragged.current = true;
+    setPos({
+      x: Math.min(Math.max(0, e.clientX - dragStart.current.x), window.innerWidth - 44),
+      y: Math.min(Math.max(0, e.clientY - dragStart.current.y), window.innerHeight - 44),
+    });
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    isDragging.current = false;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  };
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -123,9 +161,23 @@ export default function DownloadPanel({
   if (jobs.length === 0) return null;
 
   return (
-    <div className="fixed right-5 top-5 z-[80]" ref={panelRef}>
+    <div 
+      className="fixed z-[80]" 
+      ref={panelRef}
+      style={{ left: pos.x, top: pos.y, touchAction: "none" }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+    >
       <button
-        onClick={onToggle}
+        onClick={(e) => {
+          if (hasDragged.current) {
+            e.preventDefault();
+            return;
+          }
+          onToggle();
+        }}
         className="relative flex h-11 w-11 items-center justify-center rounded-full bg-[#282828]/80 shadow-lg ring-1 ring-white/10 backdrop-blur transition hover:bg-[#333]"
         title={hasActive ? etaLabel || "Downloads" : "Downloads"}
       >
@@ -165,7 +217,7 @@ export default function DownloadPanel({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-14 w-[22rem] overflow-hidden rounded-2xl border border-white/10 bg-[#121212]/95 shadow-2xl shadow-black/50 backdrop-blur-md">
+        <div className="prevent-drag absolute right-0 top-14 w-[22rem] overflow-hidden rounded-2xl border border-white/10 bg-[#121212]/95 shadow-2xl shadow-black/50 backdrop-blur-md">
           <div className="border-b border-white/5 px-4 py-3">
             <div className="mb-2 flex items-center justify-between gap-2">
               <p className="text-sm font-semibold text-white">Downloads</p>

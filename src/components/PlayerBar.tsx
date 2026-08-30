@@ -14,6 +14,7 @@ import {
   Trash2,
   X,
   Sliders,
+  PlusCircle,
 } from "lucide-react";
 import { Song } from "../lib/types";
 import { formatTime } from "../lib/utils";
@@ -92,7 +93,76 @@ export default function PlayerBar({
     volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
 
   return (
-    <div className="relative flex h-[90px] items-center gap-4 border-t border-[#282828] bg-spotify-dark px-4">
+    <>
+      {/* Mobile Mini Player */}
+      <div className="flex w-full px-2 pb-2 md:hidden">
+        {currentSong ? (
+          <div
+            onClick={onSongInfoClick}
+            className="relative flex w-full items-center justify-between overflow-hidden rounded-md bg-[#5a1420] p-2 pr-4 shadow-lg transition active:scale-[0.98]"
+          >
+            {/* Left: Cover & Info */}
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-[42px] w-[42px] shrink-0 items-center justify-center overflow-hidden rounded bg-spotify-gray shadow-md">
+                {coverUrl || currentSong.cover ? (
+                  <img
+                    src={coverUrl || currentSong.cover}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <span className="text-lg">🎵</span>
+                )}
+              </div>
+              <div className="flex min-w-0 flex-col justify-center gap-0.5">
+                <p className="truncate text-sm font-bold text-white leading-tight">
+                  {currentSong.title}
+                </p>
+                <p className="truncate text-[11px] text-[#b3b3b3] leading-tight">
+                  {currentSong.artist}
+                </p>
+              </div>
+            </div>
+
+            {/* Right: Controls */}
+            <div className="ml-2 flex shrink-0 items-center gap-4 text-white/90">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // TODO: Handle add to playlist
+                }}
+                className="transition hover:scale-105 hover:text-white"
+              >
+                <PlusCircle className="h-5 w-5" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onTogglePlay();
+                }}
+                className="flex items-center justify-center transition hover:scale-105 hover:text-white"
+              >
+                {isPlaying ? (
+                  <Pause className="h-6 w-6 fill-current" />
+                ) : (
+                  <Play className="h-6 w-6 fill-current" />
+                )}
+              </button>
+            </div>
+
+            {/* Bottom thin progress bar */}
+            <div className="absolute bottom-0 left-2 right-2 h-[2px] overflow-hidden rounded-full bg-white/20">
+              <div
+                className="h-full bg-white transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Desktop Player Bar */}
+      <div className="relative hidden h-[90px] shrink-0 items-center gap-4 border-t border-[#282828] bg-spotify-dark px-4 md:flex">
       {/* Song info */}
       <div className="flex w-[30%] min-w-[180px] items-center gap-3">
         {currentSong ? (
@@ -386,6 +456,7 @@ export default function PlayerBar({
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }

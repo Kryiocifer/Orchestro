@@ -1,15 +1,25 @@
-use futures_util::StreamExt;
-use id3::TagLike;
 use serde::{Deserialize, Serialize};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+
+#[cfg(not(target_os = "android"))]
+use futures_util::StreamExt;
+#[cfg(not(target_os = "android"))]
+use id3::TagLike;
+#[cfg(not(target_os = "android"))]
+use std::io::{BufRead, BufReader};
+#[cfg(not(target_os = "android"))]
 use std::process::{Command, Stdio};
+#[cfg(not(target_os = "android"))]
+use std::thread;
+
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+#[cfg(not(target_os = "android"))]
 fn hide_console(cmd: &mut Command) -> &mut Command {
     #[cfg(windows)]
     {
@@ -18,6 +28,7 @@ fn hide_console(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
+#[cfg(not(target_os = "android"))]
 fn hide_console_tokio(cmd: &mut tokio::process::Command) -> &mut tokio::process::Command {
     #[cfg(windows)]
     {
@@ -25,20 +36,29 @@ fn hide_console_tokio(cmd: &mut tokio::process::Command) -> &mut tokio::process:
     }
     cmd
 }
-use std::thread;
-use tauri::{AppHandle, Emitter, Manager};
+
+use tauri::{AppHandle, Manager};
+
+#[cfg(not(target_os = "android"))]
+use tauri::Emitter;
+
+#[cfg(target_os = "android")]
+pub mod android_yt;
+#[cfg(desktop)]
 use tauri::menu::{Menu, MenuItem};
+#[cfg(desktop)]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use std::collections::HashMap;
-use std::sync::Mutex;
 
 /// Active yt-dlp PIDs keyed by job_id (for cancel)
-static DOWNLOAD_PIDS: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
+#[cfg(not(target_os = "android"))]
+static DOWNLOAD_PIDS: std::sync::Mutex<Option<std::collections::HashMap<String, u32>>> =
+    std::sync::Mutex::new(None);
 
-fn pids() -> std::sync::MutexGuard<'static, Option<HashMap<String, u32>>> {
+#[cfg(not(target_os = "android"))]
+fn pids() -> std::sync::MutexGuard<'static, Option<std::collections::HashMap<String, u32>>> {
     let mut g = DOWNLOAD_PIDS.lock().unwrap();
     if g.is_none() {
-        *g = Some(HashMap::new());
+        *g = Some(std::collections::HashMap::new());
     }
     g
 }
@@ -86,6 +106,7 @@ pub struct YtDlpStatus {
     pub latest_version: Option<String>,
 }
 
+#[cfg(not(target_os = "android"))]
 fn bin_name() -> &'static str {
     if cfg!(windows) {
         "yt-dlp.exe"
@@ -94,6 +115,7 @@ fn bin_name() -> &'static str {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 fn bundled_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -104,11 +126,13 @@ fn bundled_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+#[cfg(not(target_os = "android"))]
 fn bundled_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(bundled_dir(app)?.join(bin_name()))
 }
 
 /// Prefer app-data bundled binary, then PATH
+#[cfg(not(target_os = "android"))]
 fn resolve_ytdlp(app: &AppHandle) -> Result<PathBuf, String> {
     let bundled = bundled_path(app)?;
     if bundled.exists() {
@@ -142,6 +166,7 @@ fn resolve_ytdlp(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(PathBuf::from(bin_name()))
 }
 
+#[cfg(not(target_os = "android"))]
 fn read_version(bin: &Path) -> Option<String> {
     let mut c = Command::new(bin);
     c.env_remove("PYTHONHOME").env_remove("PYTHONPATH").env_remove("LD_LIBRARY_PATH");
@@ -159,52 +184,67 @@ fn read_version(bin: &Path) -> Option<String> {
 }
 
 #[tauri::command]
-async fn yt_dlp_status(app: AppHandle) -> YtDlpStatus {
-    if let Ok(bundled) = bundled_path(&app) {
-        if bundled.exists() {
-            return YtDlpStatus {
-                available: true,
-                version: read_version(&bundled),
-                path: Some(bundled.to_string_lossy().to_string()),
-                source: "bundled".into(),
-                action: None,
-                latest_version: None,
-            };
-        }
+async fn yt_dlp_status(_app: AppHandle) -> YtDlpStatus {
+    #[cfg(target_os = "android")]
+    {
+        return YtDlpStatus {
+            available: true,
+            version: Some("native-android".to_string()),
+            path: Some("native".to_string()),
+            source: "bundled".to_string(),
+            action: None,
+            latest_version: None,
+        };
     }
 
-    if let Ok(path) = resolve_ytdlp(&app) {
-        if let Some(ver) = read_version(&path) {
-            let source = if path.to_string_lossy().contains("AppData")
-                || path.to_string_lossy().contains("orchestro")
-            {
-                "bundled"
-            } else {
-                "path"
-            };
-            return YtDlpStatus {
-                available: true,
-                version: Some(ver),
-                path: Some(path.to_string_lossy().to_string()),
-                source: source.into(),
-                action: None,
-                latest_version: None,
-            };
+    #[cfg(not(target_os = "android"))]
+    {
+        if let Ok(bundled) = bundled_path(&_app) {
+            if bundled.exists() {
+                return YtDlpStatus {
+                    available: true,
+                    version: read_version(&bundled),
+                    path: Some(bundled.to_string_lossy().to_string()),
+                    source: "bundled".into(),
+                    action: None,
+                    latest_version: None,
+                };
+            }
         }
-    }
 
-    YtDlpStatus {
-        available: false,
-        version: None,
-        path: None,
-        source: "none".into(),
-        action: None,
-        latest_version: None,
+        if let Ok(path) = resolve_ytdlp(&_app) {
+            if let Some(ver) = read_version(&path) {
+                let source = if path.to_string_lossy().contains("AppData")
+                    || path.to_string_lossy().contains("orchestro")
+                {
+                    "bundled"
+                } else {
+                    "path"
+                };
+                return YtDlpStatus {
+                    available: true,
+                    version: Some(ver),
+                    path: Some(path.to_string_lossy().to_string()),
+                    source: source.into(),
+                    action: None,
+                    latest_version: None,
+                };
+            }
+        }
+
+        YtDlpStatus {
+            available: false,
+            version: None,
+            path: None,
+            source: "none".into(),
+            action: None,
+            latest_version: None,
+        }
     }
 }
 
-#[tauri::command]
-async fn yt_dlp_update(app: AppHandle) -> Result<YtDlpStatus, String> {
+#[cfg(not(target_os = "android"))]
+async fn desktop_yt_dlp_update(app: AppHandle) -> Result<YtDlpStatus, String> {
     let dest = bundled_path(&app)?;
 
     let client = reqwest::Client::builder()
@@ -372,8 +412,9 @@ fn read_audio_base64(path: String) -> Result<String, String> {
         Some("ogg") => "audio/ogg",
         Some("opus") => "audio/ogg; codecs=opus",
         Some("m4a") | Some("aac") => "audio/mp4",
+        Some("mp4") => "video/mp4",
         Some("wav") => "audio/wav",
-        Some("webm") => "audio/webm",
+        Some("webm") => "video/webm",
         _ => "audio/mpeg",
     };
 
@@ -386,8 +427,8 @@ fn delete_file_arbitrary(path: String) -> Result<(), String> {
     std::fs::remove_file(&path).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-fn yt_download_cancel(job_id: String) -> Result<(), String> {
+#[cfg(not(target_os = "android"))]
+fn desktop_yt_download_cancel(job_id: String) -> Result<(), String> {
     let pid = {
         let mut guard = pids();
         let map = guard.as_mut().unwrap();
@@ -1749,8 +1790,8 @@ fn parse_track_list_text(text: String) -> Result<SpotifyPlaylistResult, String> 
     })
 }
 
-#[tauri::command]
-async fn yt_search(app: AppHandle, query: String) -> Result<Vec<YtSearchResult>, String> {
+#[cfg(not(target_os = "android"))]
+async fn desktop_yt_search(app: AppHandle, query: String) -> Result<Vec<YtSearchResult>, String> {
     let q = query.trim();
     if q.is_empty() {
         return Err("Empty search query".into());
@@ -1819,8 +1860,8 @@ async fn yt_search(app: AppHandle, query: String) -> Result<Vec<YtSearchResult>,
     Ok(results)
 }
 
-#[tauri::command]
-async fn yt_download(
+#[cfg(not(target_os = "android"))]
+async fn desktop_yt_download(
     app: AppHandle,
     url: String,
     output_dir: String,
@@ -2065,6 +2106,7 @@ async fn yt_download(
     result
 }
 
+#[cfg(not(target_os = "android"))]
 fn find_newest_mp3(dir: &PathBuf) -> Option<String> {
     let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
     let entries = std::fs::read_dir(dir).ok()?;
@@ -2083,12 +2125,76 @@ fn find_newest_mp3(dir: &PathBuf) -> Option<String> {
     newest.map(|(_, p)| p.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+async fn yt_search(app: AppHandle, query: String) -> Result<Vec<YtSearchResult>, String> {
+    #[cfg(not(target_os = "android"))]
+    {
+        desktop_yt_search(app, query).await
+    }
+    #[cfg(target_os = "android")]
+    {
+        crate::android_yt::yt_search(app, query).await
+    }
+}
+
+#[tauri::command]
+async fn yt_download(
+    app: AppHandle,
+    url: String,
+    output_dir: String,
+    job_id: String,
+    title: Option<String>,
+    artist: Option<String>,
+    cover_url: Option<String>,
+) -> Result<String, String> {
+    #[cfg(not(target_os = "android"))]
+    {
+        desktop_yt_download(app, url, output_dir, job_id, title, artist, cover_url).await
+    }
+    #[cfg(target_os = "android")]
+    {
+        crate::android_yt::yt_download(app, url, output_dir, job_id, title, artist, cover_url).await
+    }
+}
+
+#[tauri::command]
+fn yt_download_cancel(job_id: String) -> Result<(), String> {
+    #[cfg(not(target_os = "android"))]
+    {
+        desktop_yt_download_cancel(job_id)
+    }
+    #[cfg(target_os = "android")]
+    {
+        crate::android_yt::yt_download_cancel(job_id)
+    }
+}
+
+#[tauri::command]
+async fn yt_dlp_update(app: AppHandle) -> Result<YtDlpStatus, String> {
+    #[cfg(not(target_os = "android"))]
+    {
+        desktop_yt_dlp_update(app).await
+    }
+    #[cfg(target_os = "android")]
+    {
+        crate::android_yt::yt_dlp_update(app).await
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_shell::init());
+
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(crate::android_yt::init_plugin());
+
+    #[cfg(not(target_os = "android"))]
+    let builder = builder;
+
+    builder
         .invoke_handler(tauri::generate_handler![
             yt_search,
             yt_download,
@@ -2119,57 +2225,61 @@ pub fn run() {
             std::fs::create_dir_all(&library_dir).ok();
             std::fs::create_dir_all(&bin_dir).ok();
 
-            let show_item = MenuItem::with_id(app, "show", "Open Orchestro", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            #[cfg(desktop)]
+            {
+                let show_item = MenuItem::with_id(app, "show", "Open Orchestro", true, None::<&str>)?;
+                let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
-            let mut tray_builder = TrayIconBuilder::new()
-                .tooltip("Orchestro")
-                .menu(&menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| {
-                    match event.id.as_ref() {
-                        "show" => {
+                let mut tray_builder = TrayIconBuilder::new()
+                    .tooltip("Orchestro")
+                    .menu(&menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app, event| {
+                        match event.id.as_ref() {
+                            "show" => {
+                                if let Some(window) = app.get_webview_window("main") {
+                                    let _ = window.show();
+                                    let _ = window.unminimize();
+                                    let _ = window.set_focus();
+                                }
+                            }
+                            "quit" => {
+                                app.exit(0);
+                            }
+                            _ => {}
+                        }
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            let app = tray.app_handle();
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.show();
                                 let _ = window.unminimize();
                                 let _ = window.set_focus();
                             }
                         }
-                        "quit" => {
-                            app.exit(0);
-                        }
-                        _ => {}
-                    }
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.unminimize();
-                            let _ = window.set_focus();
-                        }
-                    }
-                });
+                    });
 
-            if let Some(icon) = app.default_window_icon() {
-                tray_builder = tray_builder.icon(icon.clone());
+                if let Some(icon) = app.default_window_icon() {
+                    tray_builder = tray_builder.icon(icon.clone());
+                }
+
+                tray_builder.build(app)?;
             }
-
-            tray_builder.build(app)?;
 
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|_window, _event| {
+            #[cfg(desktop)]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = _event {
                 api.prevent_close();
-                let _ = window.hide();
+                let _ = _window.hide();
             }
         })
         .run(tauri::generate_context!())

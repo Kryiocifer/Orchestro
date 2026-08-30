@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Song, Playlist } from "../lib/types";
-import { Play, Clock, Plus, Search, Check } from "lucide-react";
+import { Plus, Search, Check, Play, Clock, MoreHorizontal } from "lucide-react";
 import { formatDuration } from "../lib/utils";
 import ContextMenu from "./ContextMenu";
 import { cn } from "../lib/utils";
@@ -17,6 +17,7 @@ interface LibraryViewProps {
   onCreatePlaylistAndAdd: (songIds: string[]) => void;
   onRemoveSong: (songIds: string[]) => void;
   onAddSongs: () => void;
+  onOpenPlaylist: (id: string) => void;
 }
 
 function getSongFolder(song: Song, musicFolder?: string | null): string {
@@ -53,6 +54,7 @@ export default function LibraryView({
   onCreatePlaylistAndAdd,
   onRemoveSong,
   onAddSongs,
+  onOpenPlaylist,
 }: LibraryViewProps) {
   const [query, setQuery] = useState("");
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
@@ -292,10 +294,52 @@ export default function LibraryView({
           No songs match “{query}”
         </p>
       ) : (
-        <div className="rounded-md select-none">
-          <div className="sticky top-0 z-10 grid grid-cols-[auto_16px_4fr_3fr_2fr_minmax(120px,1fr)] gap-4 border-b border-[#2a2a2a] bg-spotify-black/80 px-4 pb-2 pt-2 text-xs font-medium uppercase tracking-wider text-spotify-lightgray backdrop-blur">
+        <div className="mt-6 flex-1 min-h-0">
+          
+          {selectedFolder === null && playlists.length > 0 && (
+            <div className="mb-8">
+              <h2 className="mb-4 text-xl font-bold text-white tracking-tight">Playlists</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                {playlists.map((playlist) => (
+                  <div
+                    key={playlist.id}
+                    onClick={() => onOpenPlaylist(playlist.id)}
+                    className="group relative flex cursor-pointer flex-col overflow-hidden rounded-xl bg-white/5 p-4 transition-all hover:bg-white/10 hover:shadow-xl"
+                  >
+                    <div className="relative mb-4 aspect-square w-full overflow-hidden rounded-lg bg-gradient-to-br from-white/10 to-white/5 shadow-md">
+                      <div className="absolute inset-0 flex items-center justify-center text-4xl">
+                        🎵
+                      </div>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-base font-bold text-white">
+                        {playlist.name}
+                      </p>
+                      <p className="mt-1 truncate text-sm text-spotify-lightgray">
+                        {playlist.songIds.length} tracks
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-xl font-bold text-white tracking-tight">Songs</h2>
+            <div className="hidden md:flex items-center gap-4 text-sm text-spotify-lightgray">
+              <div className="cursor-pointer hover:text-white flex items-center gap-1" onClick={() => handleSort("dateAdded")}>
+                Date Added {sortConfig?.key === "dateAdded" && (sortConfig.asc ? "↑" : "↓")}
+              </div>
+              <div className="cursor-pointer hover:text-white flex items-center gap-1" onClick={() => handleSort("title")}>
+                Title {sortConfig?.key === "title" && (sortConfig.asc ? "↑" : "↓")}
+              </div>
+            </div>
+          </div>
+
+          <div className="hidden md:grid grid-cols-[auto_48px_minmax(0,4fr)_minmax(0,3fr)_minmax(0,2fr)_minmax(80px,1fr)] gap-4 border-b border-white/10 px-4 pb-2 text-xs font-semibold uppercase tracking-wider text-spotify-lightgray select-none mb-2">
             <div className="w-6" />
-            <div className="cursor-pointer hover:text-white flex items-center gap-1" onClick={() => handleSort("sno")}>
+            <div className="text-center cursor-pointer hover:text-white" onClick={() => handleSort("sno")}>
               # {sortConfig?.key === "sno" && (sortConfig.asc ? "↑" : "↓")}
             </div>
             <div className="cursor-pointer hover:text-white flex items-center gap-1" onClick={() => handleSort("title")}>
@@ -312,7 +356,7 @@ export default function LibraryView({
             </div>
           </div>
 
-          <div className="mt-2">
+          <div className="flex flex-col gap-1 pb-20">
             {filtered.map((song, index) => {
               const isCurrent = song.id === currentSongId;
               const isSelected = selected.has(song.id);
@@ -322,15 +366,18 @@ export default function LibraryView({
                   onClick={(e) => handleRowClick(e, song, index)}
                   onContextMenu={(e) => handleContextMenu(e, song.id)}
                   className={cn(
-                    "group grid cursor-pointer grid-cols-[auto_16px_4fr_3fr_2fr_minmax(120px,1fr)] gap-4 rounded-md px-4 py-2.5 text-sm transition select-none",
+                    "group relative flex md:grid md:grid-cols-[auto_48px_minmax(0,4fr)_minmax(0,3fr)_minmax(0,2fr)_minmax(80px,1fr)] items-center gap-3 md:gap-4 rounded-md px-2 md:px-4 py-2 text-sm transition select-none cursor-pointer",
                     isSelected
                       ? "bg-white/20"
                       : "hover:bg-white/10"
                   )}
                 >
-                  {/* Checkbox — visible when selection active or row hovered */}
+                  {/* Checkbox (always takes space but hidden until hover on desktop, or selection active) */}
                   <div
-                    className="flex w-6 items-center justify-center"
+                    className={cn(
+                      "flex w-6 items-center justify-center shrink-0",
+                      selected.size > 0 ? "block" : "hidden md:flex"
+                    )}
                     onClick={(e) => {
                       e.stopPropagation();
                       setSelected((prev) => {
@@ -347,7 +394,7 @@ export default function LibraryView({
                         "flex h-4 w-4 items-center justify-center rounded border transition",
                         isSelected
                           ? "border-spotify-green bg-spotify-green text-black"
-                          : "border-white/30 opacity-0 group-hover:opacity-100",
+                          : "border-white/40 opacity-0 group-hover:opacity-100",
                         selected.size > 0 && !isSelected && "opacity-100"
                       )}
                     >
@@ -355,19 +402,25 @@ export default function LibraryView({
                     </div>
                   </div>
 
-                  <div className="flex items-center text-spotify-lightgray">
+                  {/* Desktop play icon / index */}
+                  <div className="hidden md:flex items-center justify-center text-spotify-lightgray w-12 shrink-0">
                     {isCurrent && isPlaying ? (
-                      <span className="text-spotify-green">♫</span>
+                      <div className="flex h-4 w-4 items-end justify-center gap-[2px]">
+                        <div className="h-2 w-[3px] animate-[bounce_1s_infinite] bg-spotify-green" />
+                        <div className="h-4 w-[3px] animate-[bounce_1s_0.2s_infinite] bg-spotify-green" />
+                        <div className="h-2.5 w-[3px] animate-[bounce_1s_0.4s_infinite] bg-spotify-green" />
+                      </div>
                     ) : (
                       <>
-                        <span className="group-hover:hidden">{index + 1}</span>
-                        <Play className="hidden h-4 w-4 fill-white group-hover:block" />
+                        <span className={cn("group-hover:hidden", isCurrent && "text-spotify-green")}>{index + 1}</span>
+                        <Play className="hidden h-4 w-4 fill-white text-white group-hover:block" />
                       </>
                     )}
                   </div>
 
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded bg-spotify-gray">
+                  {/* Title and Cover */}
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded bg-spotify-gray shadow-md">
                       {song.cover ? (
                         <img
                           src={song.cover}
@@ -375,34 +428,60 @@ export default function LibraryView({
                           className="h-full w-full object-cover"
                         />
                       ) : (
-                        <span className="text-lg">🎵</span>
+                        <span className="text-xl">🎵</span>
+                      )}
+                      
+                      {/* Mobile Play indicator overlaying cover */}
+                      {isCurrent && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/60 md:hidden">
+                          {isPlaying ? (
+                            <div className="flex h-3 w-3 items-end justify-center gap-[2px]">
+                              <div className="h-1.5 w-[2px] animate-[bounce_1s_infinite] bg-spotify-green" />
+                              <div className="h-3 w-[2px] animate-[bounce_1s_0.2s_infinite] bg-spotify-green" />
+                              <div className="h-2 w-[2px] animate-[bounce_1s_0.4s_infinite] bg-spotify-green" />
+                            </div>
+                          ) : (
+                            <span className="text-spotify-green text-[10px] font-bold">♫</span>
+                          )}
+                        </div>
                       )}
                     </div>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p
                         className={cn(
-                          "truncate font-medium",
-                          isCurrent && "text-spotify-green"
+                          "truncate font-medium text-base",
+                          isCurrent ? "text-spotify-green" : "text-white"
                         )}
                       >
                         {song.title}
                       </p>
-                      <p className="truncate text-spotify-lightgray">
+                      <p className="truncate text-sm text-spotify-lightgray">
                         {song.artist}
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex items-center truncate text-spotify-lightgray">
+                  {/* Desktop Album */}
+                  <div className="hidden md:flex items-center truncate text-spotify-lightgray text-sm">
                     {song.album}
                   </div>
 
-                  <div className="flex items-center text-spotify-lightgray">
+                  {/* Desktop Date Added */}
+                  <div className="hidden md:flex items-center text-spotify-lightgray text-sm">
                     {new Date(song.addedAt).toLocaleDateString()}
                   </div>
 
-                  <div className="flex items-center justify-end text-spotify-lightgray">
-                    {formatDuration(song.duration)}
+                  {/* Desktop Duration & Context Menu */}
+                  <div className="flex items-center justify-end gap-4 text-spotify-lightgray text-sm shrink-0">
+                    <div className="hidden md:block">
+                      {formatDuration(song.duration)}
+                    </div>
+                    <button 
+                      className="md:hidden p-2 -mr-2 text-spotify-lightgray hover:text-white"
+                      onClick={(e) => handleContextMenu(e, song.id)}
+                    >
+                      <MoreHorizontal className="h-5 w-5" />
+                    </button>
                   </div>
                 </div>
               );

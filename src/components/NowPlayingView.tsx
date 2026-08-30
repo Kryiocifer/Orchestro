@@ -202,7 +202,7 @@ export default function NowPlayingView({
 
   return (
     <div
-      className="fixed inset-0 z-[200] flex flex-col bg-[#121212]"
+      className="fixed inset-0 z-[200] flex flex-col bg-[#121212] safe-pb"
       style={{
         animation: "nowPlayingSlideUp 0.35s cubic-bezier(0.25,1,0.5,1) both",
       }}
@@ -225,7 +225,7 @@ export default function NowPlayingView({
       </div>
 
       {/* Header */}
-      <div className="relative z-10 flex w-full items-center justify-between px-8 pt-6 pb-2">
+      <div className="relative z-10 flex w-full items-center justify-between px-8 pt-6 pb-2 safe-pt">
         <button
           onClick={onClose}
           className="flex items-center gap-1.5 rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-white/80 transition hover:bg-white/20 hover:text-white"

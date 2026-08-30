@@ -139,6 +139,7 @@ dist
 # Tauri / Rust
 src-tauri/target/
 src-tauri/WixTools/
+src-tauri/gen/
 
 # Optional: installer outputs if they ever land in the repo root
 *.exe

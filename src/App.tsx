@@ -13,7 +13,11 @@ import ImportView from "./components/ImportView";
 import DownloadPanel, { DownloadJob } from "./components/DownloadPanel";
 import NowPlayingView from "./components/NowPlayingView";
 import EqualizerModal from "./components/EqualizerModal";
+import BottomNav from "./components/BottomNav";
+import SettingsView from "./components/SettingsView";
+import DownloadWrapper from "./components/DownloadWrapper";
 import { equalizerEngine } from "./lib/equalizer";
+
 import {
   loadLibrary,
   addSongsBatch,
@@ -34,6 +38,7 @@ import {
 } from "./lib/library";
 import { Song, LibraryData, View, SavedPlaybackState } from "./lib/types";
 import { isAudioFile } from "./lib/utils";
+import AndroidFolderBrowser from "./components/AndroidFolderBrowser";
 
 function App() {
   const [library, setLibrary] = useState<LibraryData>({
@@ -54,6 +59,7 @@ function App() {
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [showNowPlaying, setShowNowPlaying] = useState(false);
   const [equalizerOpen, setEqualizerOpen] = useState(false);
+  const [androidFolderPicker, setAndroidFolderPicker] = useState<'music' | 'download' | null>(null);
   useEffect(() => {
     if (downloadJobs.some((j) => j.status === "downloading" || j.status === "queued" || j.status === "converting")) {
       setDownloadPanelOpen(true);
@@ -1060,7 +1066,7 @@ function App() {
         filters: [
           {
             name: "Audio",
-            extensions: ["mp3", "flac", "wav", "ogg", "m4a", "aac", "wma", "opus"],
+            extensions: ["mp3", "flac", "wav", "ogg", "m4a", "mp4", "aac", "wma", "opus", "webm"],
           },
         ],
       });
@@ -1102,16 +1108,51 @@ function App() {
 
   // ---------- Playlist helpers ----------
 
+  const resolveAndroidPath = (uri: string): string => {
+    if (!uri.startsWith("content://")) return uri;
+    try {
+      const decoded = decodeURIComponent(uri);
+      if (decoded.includes("primary:")) {
+        const parts = decoded.split("primary:");
+        if (parts.length > 1) {
+          return `/storage/emulated/0/${parts[1]}`;
+        }
+      } else if (decoded.includes("raw:")) {
+        const parts = decoded.split("raw:");
+        if (parts.length > 1) {
+          return parts[1];
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to parse content uri", e);
+    }
+    return uri;
+  };
+
   const handleLinkFolder = async () => {
     try {
+      const isAndroid = navigator.userAgent.toLowerCase().includes("android");
+      if (isAndroid) {
+        setAndroidFolderPicker('music');
+        return;
+      }
+      let selected: string | null = null;
       const { open } = await import("@tauri-apps/plugin-dialog");
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: "Select your music folder",
-      });
+      selected = (await open({
+          directory: true,
+          multiple: false,
+          title: "Select your music folder",
+        })) as string | null;
       if (!selected || Array.isArray(selected)) return;
+      await processSelectedMusicFolder(resolveAndroidPath(selected));
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to link folder");
+    }
+  };
 
+  const processSelectedMusicFolder = async (selected: string) => {
+    try {
       await setMusicFolder(selected);
       setIsScanning(true);
       toast("Scanning folder…");
@@ -1173,16 +1214,29 @@ function App() {
 
   const handlePickDownloadFolder = async () => {
     try {
+      const isAndroid = navigator.userAgent.toLowerCase().includes("android");
+      if (isAndroid) {
+        setAndroidFolderPicker('download');
+        return;
+      }
+      let selected: string | null = null;
       const { open } = await import("@tauri-apps/plugin-dialog");
-      // Prefer last download folder — never fall back to music folder
-      // (Windows otherwise reopens the previous dialog path, often Music Folder)
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: "Choose download folder for YouTube audio",
-        defaultPath: library.downloadFolder || undefined,
-      });
+      selected = (await open({
+          directory: true,
+          multiple: false,
+          title: "Choose download folder for YouTube audio",
+          defaultPath: library.downloadFolder || undefined,
+        })) as string | null;
       if (!selected || Array.isArray(selected)) return;
+      await processSelectedDownloadFolder(resolveAndroidPath(selected));
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to set download folder");
+    }
+  };
+
+  const processSelectedDownloadFolder = async (selected: string) => {
+    try {
       const fresh = await setDownloadFolder(selected);
       setLibrary(fresh);
       toast.success("Download folder set");
@@ -1192,8 +1246,8 @@ function App() {
     }
   };
 
-  const handleYtDownloaded = async (filePath: string, title: string) => {
-    const fileName = filePath.split(/[/\\]/).pop() || title;
+  const handleYtDownloaded = async (filePath: string, fallbackName?: string) => {
+    const fileName = filePath.split(/[/\\]/).pop() || fallbackName || "YouTube Track";
     const result = await addSongFromPath(filePath, fileName, 0);
     const fresh = await loadLibrary();
     setLibrary(fresh);
@@ -1599,8 +1653,9 @@ function App() {
       )}
 
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar
-          currentView={currentView}
+        <div className="hidden md:flex h-full shrink-0">
+          <Sidebar
+            currentView={currentView}
           setCurrentView={setCurrentView}
           playlists={library.playlists}
           activePlaylistId={activePlaylistId}
@@ -1618,8 +1673,9 @@ function App() {
           downloadFolder={library.downloadFolder}
           onPickDownloadFolder={handlePickDownloadFolder}
         />
+        </div>
 
-        <main className="flex-1 overflow-y-auto bg-gradient-to-b from-[#1a1a1a] to-spotify-black">
+        <main className="flex flex-1 flex-col overflow-y-auto bg-gradient-to-b from-[#1a1a1a] to-spotify-black relative">
           {currentView === "home" && (
             <HomeView
               songs={library.songs}
@@ -1655,28 +1711,67 @@ function App() {
               onCreatePlaylistAndAdd={handleCreatePlaylistAndAdd}
               onRemoveSong={handleRemoveSong}
               onAddSongs={handleAddSongsClick}
+              onOpenPlaylist={(id) => {
+                setActivePlaylistId(id);
+                setCurrentView("playlist");
+              }}
             />
           )}
           {currentView === "import" && (
-            <ImportView
+            <div className="hidden md:block h-full">
+              <ImportView
+                downloadFolder={library.downloadFolder}
+                onPickDownloadFolder={handlePickDownloadFolder}
+                jobs={downloadJobs}
+                setJobs={setDownloadJobs}
+                spotifyClientId={library.spotifyClientId}
+                onSaveSpotifyClientId={async (id) => {
+                  const fresh = await setSpotifyCredentials(id, null);
+                  setLibrary(fresh);
+                }}
+              />
+            </div>
+          )}
+          {currentView === "youtube" && (
+            <div className="hidden md:block h-full">
+              <YouTubeView
+                downloadFolder={library.downloadFolder}
+                onPickDownloadFolder={handlePickDownloadFolder}
+                onDownloaded={handleYtDownloaded}
+                jobs={downloadJobs}
+                setJobs={setDownloadJobs}
+              />
+            </div>
+          )}
+          {(currentView === "youtube" || currentView === "import") && (
+            <div className="block md:hidden h-full">
+              <DownloadWrapper
+                downloadFolder={library.downloadFolder}
+                onPickDownloadFolder={handlePickDownloadFolder}
+                onYtDownloaded={handleYtDownloaded}
+                jobs={downloadJobs}
+                setJobs={setDownloadJobs}
+                spotifyClientId={library.spotifyClientId}
+                onSaveSpotifyClientId={async (id) => {
+                  const fresh = await setSpotifyCredentials(id, null);
+                  setLibrary(fresh);
+                }}
+              />
+            </div>
+          )}
+          {currentView === "settings" && (
+            <SettingsView
+              musicFolder={library.musicFolder}
               downloadFolder={library.downloadFolder}
+              isScanning={isScanning}
+              onLinkFolder={handleLinkFolder}
+              onRescan={handleRescan}
               onPickDownloadFolder={handlePickDownloadFolder}
-              jobs={downloadJobs}
-              setJobs={setDownloadJobs}
               spotifyClientId={library.spotifyClientId}
               onSaveSpotifyClientId={async (id) => {
                 const fresh = await setSpotifyCredentials(id, null);
                 setLibrary(fresh);
               }}
-            />
-          )}
-          {currentView === "youtube" && (
-            <YouTubeView
-              downloadFolder={library.downloadFolder}
-              onPickDownloadFolder={handlePickDownloadFolder}
-              onDownloaded={handleYtDownloaded}
-              jobs={downloadJobs}
-              setJobs={setDownloadJobs}
             />
           )}
           {currentView === "playlist" && activePlaylist && (
@@ -1813,10 +1908,32 @@ function App() {
         onOpenEqualizer={() => setEqualizerOpen(true)}
       />
 
+      <BottomNav currentView={currentView} setCurrentView={setCurrentView} />
+
       <EqualizerModal
         isOpen={equalizerOpen}
         onClose={() => setEqualizerOpen(false)}
       />
+
+      {/* Android Folder Picker Modal */}
+      {androidFolderPicker && (
+        <AndroidFolderBrowser
+          title={androidFolderPicker === "music" ? "Select Music Folder" : "Select Download Folder"}
+          onCancel={() => setAndroidFolderPicker(null)}
+          onSelect={async (path) => {
+            setAndroidFolderPicker(null);
+            try {
+              if (androidFolderPicker === "music") {
+                await processSelectedMusicFolder(path);
+              } else {
+                await processSelectedDownloadFolder(path);
+              }
+            } catch (e) {
+              toast.error("Failed to set folder");
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

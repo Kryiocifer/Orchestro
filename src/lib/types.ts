@@ -43,7 +43,7 @@ export interface LibraryData {
   lastPlayed?: SavedPlaybackState | null;
 }
 
-export type View = "home" | "library" | "playlist" | "youtube" | "import";
+export type View = "home" | "library" | "playlist" | "youtube" | "import" | "settings";
 
 export interface YtSearchResult {
   id: string;

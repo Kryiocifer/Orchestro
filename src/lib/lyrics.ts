@@ -73,7 +73,7 @@ export function cleanTrackTitle(title: string): string {
     .replace(/\s*\(prod\..*?\)/gi, "")
     .replace(/\s*\(remastered.*?\)/gi, "")
     .replace(/\s*-\s*remastered.*?$/gi, "")
-    .replace(/\.(mp3|flac|wav|m4a|aac|ogg|opus)$/i, "")
+    .replace(/\.(mp3|flac|wav|m4a|mp4|aac|ogg|opus|webm)$/i, "")
     .trim();
 }
 

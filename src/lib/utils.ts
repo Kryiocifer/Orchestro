@@ -43,9 +43,11 @@ export const SUPPORTED_EXTENSIONS = [
   "wav",
   "ogg",
   "m4a",
+  "mp4",
   "aac",
   "wma",
   "opus",
+  "webm",
 ];
 
 export function isAudioFile(filename: string): boolean {
