@@ -4,13 +4,13 @@ export interface LyricLine {
 }
 
 export interface LyricsData {
-  id?: number;
+  id?: number | string;
   trackName: string;
   artistName: string;
   synced: boolean;
   lines: LyricLine[];
   plain?: string;
-  source: "lrclib" | "cached" | "none";
+  source: "lrclib" | "musixmatch" | "youtube" | "jiosaavn" | "cached" | "none";
 }
 
 const lyricsCache = new Map<string, LyricsData | null>();
@@ -57,7 +57,7 @@ export function saveLyricOffset(songId: string, offset: number) {
  * e.g., "Song Name (Official Music Video) [feat. Artist]" -> "Song Name"
  */
 export function cleanTrackTitle(title: string): string {
-  return title
+  let cleaned = title
     .replace(/\s*\(official\s*(music\s*)?video\)/gi, "")
     .replace(/\s*\[official\s*(music\s*)?video\]/gi, "")
     .replace(/\s*\(official\s*audio\)/gi, "")
@@ -74,7 +74,35 @@ export function cleanTrackTitle(title: string): string {
     .replace(/\s*\(remastered.*?\)/gi, "")
     .replace(/\s*-\s*remastered.*?$/gi, "")
     .replace(/\.(mp3|flac|wav|m4a|aac|ogg|opus)$/i, "")
-    .trim();
+    .replace(/\s*\[[a-zA-Z0-9_-]{11}\]/g, ""); // Strip trailing YouTube ID
+
+  // Strip common YouTube fluff
+  cleaned = cleaned.replace(/\s*official\s*full\s*video\s*song\s*/gi, " ");
+  cleaned = cleaned.replace(/\s*official\s*video\s*song\s*/gi, " ");
+  cleaned = cleaned.replace(/\s*full\s*video\s*song\s*/gi, " ");
+  cleaned = cleaned.replace(/\s*4k\s*video\s*song\s*/gi, " ");
+  cleaned = cleaned.replace(/\s*video\s*song\s*/gi, " ");
+  cleaned = cleaned.replace(/\s*full\s*video\s*/gi, " ");
+  cleaned = cleaned.replace(/\s*lyrical\s*video\s*/gi, " ");
+  cleaned = cleaned.replace(/\s*lyrical\s*song\s*/gi, " ");
+  cleaned = cleaned.replace(/\s*official\s*video\s*/gi, " ");
+
+  // Remove standalone "Song" or "Video"
+  cleaned = cleaned.replace(/\bvideo\b/gi, "");
+  cleaned = cleaned.replace(/\bsong\b/gi, "");
+  cleaned = cleaned.replace(/\bsongs\b/gi, "");
+
+  // Remove leading channel/artist tags like "@SaiAbhyankkar - "
+  cleaned = cleaned.replace(/^@[\w\s]+\s*-\s*/, "");
+
+  // Replace standard and fullwidth yt-dlp pipes with a space
+  cleaned = cleaned.replace(/\||｜/g, " ");
+
+  // Condense extra spaces and hyphens
+  cleaned = cleaned.replace(/\s{2,}/g, " ");
+  cleaned = cleaned.replace(/\s+-\s+/g, " ");
+  
+  return cleaned.trim();
 }
 
 export function cleanArtistName(artist: string): string {
@@ -120,6 +148,208 @@ export function parseLRC(lrcText: string): LyricLine[] {
   // Sort chronologically
   result.sort((a, b) => a.time - b.time);
   return result;
+}
+
+/**
+ * Unofficial Musixmatch API Fallback
+ */
+async function fetchMusixmatchLyrics(title: string, artist: string): Promise<LyricsData | null> {
+  try {
+    const cleanTitle = cleanTrackTitle(title);
+    const cleanArtist = cleanArtistName(artist);
+
+    // 1. Get or generate token
+    let token = localStorage.getItem("mxm_token");
+    if (!token) {
+      const tokenRes = await fetch("https://apic-desktop.musixmatch.com/ws/1.1/token.get?app_id=web-desktop-app-v1.0");
+      if (tokenRes.ok) {
+        const tokenJson = await tokenRes.json();
+        const newToken = tokenJson.message?.body?.user_token;
+        if (newToken && tokenJson.message?.header?.status_code === 200) {
+          token = newToken;
+          localStorage.setItem("mxm_token", newToken);
+        }
+      }
+    }
+
+    if (!token) return null;
+
+    // 2. Fetch lyrics using token
+    const url = `https://apic-desktop.musixmatch.com/ws/1.1/macro.subtitles.get?format=json&q_track=${encodeURIComponent(cleanTitle)}&q_artist=${encodeURIComponent(cleanArtist)}&user_token=${token}&app_id=web-desktop-app-v1.0`;
+    
+    const res = await fetch(url);
+    if (!res.ok) return null;
+
+    const json = await res.json();
+    if (json.message?.header?.status_code === 401) {
+      // Token expired or invalid, clear it
+      localStorage.removeItem("mxm_token");
+      return null;
+    }
+
+    const macroBody = json.message?.body?.macro_calls;
+    if (!macroBody) return null;
+
+    const subtitles = macroBody["track.subtitles.get"]?.message?.body?.subtitle_list;
+    const plain = macroBody["track.lyrics.get"]?.message?.body?.lyrics?.lyrics_body;
+    const track = macroBody["matcher.track.get"]?.message?.body?.track;
+
+    if (subtitles && subtitles.length > 0) {
+      const subtitleText = subtitles[0].subtitle.subtitle_body;
+      if (subtitleText) {
+        return {
+          id: track?.track_id || "mxm",
+          trackName: track?.track_name || cleanTitle,
+          artistName: track?.artist_name || cleanArtist,
+          synced: true,
+          lines: parseLRC(subtitleText),
+          plain: plain || undefined,
+          source: "musixmatch",
+        };
+      }
+    } else if (plain) {
+      return {
+        id: track?.track_id || "mxm",
+        trackName: track?.track_name || cleanTitle,
+        artistName: track?.artist_name || cleanArtist,
+        synced: false,
+        lines: [],
+        plain: plain,
+        source: "musixmatch",
+      };
+    }
+  } catch (err) {
+    console.warn("Musixmatch fallback failed:", err);
+  }
+  return null;
+}
+
+/**
+ * Unofficial YouTube Music API Fallback
+ */
+async function fetchYouTubeMusicLyrics(title: string, artist: string): Promise<LyricsData | null> {
+  try {
+    const cleanTitle = cleanTrackTitle(title);
+    const cleanArtist = cleanArtistName(artist);
+    const query = `${cleanTitle} ${cleanArtist}`.trim();
+
+    const clientCtx = { context: { client: { clientName: "WEB_REMIX", clientVersion: "1.20230522.01.00" } } };
+    // Required headers to avoid CORS rejection in WebKit-based WebViews (Tauri)
+    const ytmHeaders = {
+      "Content-Type": "application/json",
+      "Origin": "https://music.youtube.com",
+      "Referer": "https://music.youtube.com/",
+      "X-YouTube-Client-Name": "67",
+      "X-YouTube-Client-Version": "1.20230522.01.00",
+    };
+
+    // 1. Search for songs
+    const sRes = await fetch("https://music.youtube.com/youtubei/v1/search", {
+      method: "POST",
+      headers: ytmHeaders,
+      body: JSON.stringify({
+        ...clientCtx,
+        query: query,
+        params: "EgWKAQIIAWoKEAkQChAFEAMQBA==" // Filter for Songs
+      })
+    });
+    if (!sRes.ok) return null;
+    const sJson = await sRes.json();
+    const results = sJson.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents?.[0]?.musicShelfRenderer?.contents;
+    if (!results || results.length === 0) return null;
+    const videoId = results[0]?.musicResponsiveListItemRenderer?.playlistItemData?.videoId;
+    if (!videoId) return null;
+
+    // 2. Next endpoint
+    const nRes = await fetch("https://music.youtube.com/youtubei/v1/next", {
+      method: "POST",
+      headers: ytmHeaders,
+      body: JSON.stringify({
+        ...clientCtx,
+        videoId: videoId
+      })
+    });
+    if (!nRes.ok) return null;
+    const nJson = await nRes.json();
+    const tabs = nJson.contents?.singleColumnMusicWatchNextResultsRenderer?.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs;
+    if (!tabs) return null;
+    const lyricsTab = tabs.find((t: any) => t.tabRenderer?.title === "Lyrics")?.tabRenderer;
+    if (!lyricsTab || !lyricsTab.endpoint) return null;
+    const browseId = lyricsTab.endpoint.browseEndpoint?.browseId;
+    if (!browseId) return null;
+
+    // 3. Browse Lyrics
+    const bRes = await fetch("https://music.youtube.com/youtubei/v1/browse", {
+      method: "POST",
+      headers: ytmHeaders,
+      body: JSON.stringify({
+        ...clientCtx,
+        browseId: browseId
+      })
+    });
+    if (!bRes.ok) return null;
+    const bJson = await bRes.json();
+    const lyrics = bJson.contents?.sectionListRenderer?.contents?.[0]?.musicDescriptionShelfRenderer?.description?.runs?.[0]?.text;
+    if (!lyrics) return null;
+
+    return {
+      id: videoId,
+      trackName: cleanTitle,
+      artistName: cleanArtist,
+      synced: false,
+      lines: [],
+      plain: lyrics,
+      source: "youtube",
+    };
+  } catch (err) {
+    console.warn("YouTube Music lyrics fallback failed:", err);
+  }
+  return null;
+}
+
+/**
+ * Fallback to Unofficial JioSaavn API for Indian songs
+ */
+async function fetchJioSaavnLyrics(title: string, artist: string): Promise<LyricsData | null> {
+  try {
+    const cleanTitle = cleanTrackTitle(title);
+    const cleanArtist = cleanArtistName(artist);
+    const query = encodeURIComponent(`${cleanTitle} ${cleanArtist}`.trim());
+
+    const searchUrl = `https://saavn.dev/api/search/songs?query=${query}`;
+    const searchRes = await fetch(searchUrl);
+    if (!searchRes.ok) return null;
+    
+    const searchData = await searchRes.json();
+    if (!searchData?.success || !searchData?.data?.results?.length) return null;
+
+    const song = searchData.data.results.find((r: any) => r.hasLyrics) || searchData.data.results[0];
+    if (!song || !song.id) return null;
+
+    const lyricsUrl = `https://saavn.dev/api/songs/${song.id}/lyrics`;
+    const lyricsRes = await fetch(lyricsUrl);
+    if (!lyricsRes.ok) return null;
+    
+    const lyricsData = await lyricsRes.json();
+    if (!lyricsData?.success || !lyricsData?.data?.lyrics) return null;
+
+    let plainLyrics = lyricsData.data.lyrics;
+    plainLyrics = plainLyrics.replace(/<br\s*\/?>/gi, '\n');
+    plainLyrics = plainLyrics.replace(/<[^>]*>?/gm, '');
+
+    return {
+      id: song.id,
+      trackName: song.name || cleanTitle,
+      artistName: song.primaryArtists || cleanArtist,
+      synced: false,
+      lines: [],
+      plain: plainLyrics,
+      source: "jiosaavn",
+    };
+  } catch (err) {
+    console.warn("JioSaavn lyrics fallback failed:", err);
+    return null;
+  }
 }
 
 /**
@@ -215,6 +445,38 @@ export async function fetchLyrics(
           return parsed;
         }
       }
+    }
+    // 3. Unofficial Musixmatch Fallback
+    try {
+      const mxmData = await fetchMusixmatchLyrics(title, artist);
+      if (mxmData) {
+        lyricsCache.set(cacheKey, mxmData);
+        return mxmData;
+      }
+    } catch (err) {
+      console.warn("Musixmatch fallback failed", err);
+    }
+
+    // 4. Unofficial YouTube Music Fallback
+    try {
+      const ytData = await fetchYouTubeMusicLyrics(title, artist);
+      if (ytData) {
+        lyricsCache.set(cacheKey, ytData);
+        return ytData;
+      }
+    } catch (err) {
+      console.warn("YouTube Music fallback failed", err);
+    }
+
+    // 5. Unofficial JioSaavn Fallback for Indian Songs
+    try {
+      const jioData = await fetchJioSaavnLyrics(title, artist);
+      if (jioData) {
+        lyricsCache.set(cacheKey, jioData);
+        return jioData;
+      }
+    } catch (err) {
+      console.warn("JioSaavn fallback failed", err);
     }
   } catch (err) {
     console.warn("Failed to fetch lyrics:", err);

@@ -32,8 +32,11 @@ import {
   setDownloadFolder,
   addSongFromPath,
 } from "./lib/library";
+import { enrichSong, applyEnrichment } from "./lib/enrichment";
 import { Song, LibraryData, View, SavedPlaybackState } from "./lib/types";
 import { isAudioFile } from "./lib/utils";
+import { fetchRemoteCoverArt } from "./lib/metadata";
+import EnrichmentModal from "./components/EnrichmentModal";
 
 function App() {
   const [library, setLibrary] = useState<LibraryData>({
@@ -54,6 +57,7 @@ function App() {
   const [downloadPanelOpen, setDownloadPanelOpen] = useState(false);
   const [showNowPlaying, setShowNowPlaying] = useState(false);
   const [equalizerOpen, setEqualizerOpen] = useState(false);
+  const [enrichmentOpen, setEnrichmentOpen] = useState(false);
   useEffect(() => {
     if (downloadJobs.some((j) => j.status === "downloading" || j.status === "queued" || j.status === "converting")) {
       setDownloadPanelOpen(true);
@@ -203,12 +207,27 @@ function App() {
     }
     let active = true;
     invoke<string | null>("get_song_cover", { path: currentSong.path })
-      .then((b64) => {
-        if (active && b64) setCurrentCoverUrl(b64);
-        else if (active) setCurrentCoverUrl(null);
+      .then(async (b64) => {
+        if (!active) return;
+        if (b64) {
+          // Embedded ID3 art found — use it directly
+          setCurrentCoverUrl(b64);
+        } else {
+          // No embedded art — fetch from iTunes (free, no key)
+          const remote = await fetchRemoteCoverArt(
+            currentSong.title,
+            currentSong.artist
+          );
+          if (active) setCurrentCoverUrl(remote);
+        }
       })
-      .catch(() => {
-        if (active) setCurrentCoverUrl(null);
+      .catch(async () => {
+        if (!active) return;
+        const remote = await fetchRemoteCoverArt(
+          currentSong.title,
+          currentSong.artist
+        );
+        if (active) setCurrentCoverUrl(remote);
       });
     return () => { active = false; };
   }, [currentSong]);
@@ -1193,8 +1212,34 @@ function App() {
   };
 
   const handleYtDownloaded = async (filePath: string, title: string) => {
-    const fileName = filePath.split(/[/\\]/).pop() || title;
-    const result = await addSongFromPath(filePath, fileName, 0);
+    let finalPath = filePath;
+    let fileName = filePath.split(/[/\\]/).pop() || title;
+    
+    // Auto-enrich new downloads to get clean names, cover art, and metadata
+    try {
+      const tempSong = {
+        id: "temp",
+        title: title || fileName.replace(/\.[^/.]+$/, ""),
+        artist: "Unknown Artist",
+        album: "Unknown Album",
+        path: filePath,
+        fileName,
+        duration: 0
+      } as Song;
+      
+      const result = await enrichSong(tempSong);
+      if (result.status === "updated") {
+        const newPath = await applyEnrichment(tempSong, result);
+        if (newPath) {
+          finalPath = newPath;
+          fileName = newPath.replace(/\\/g, "/").split("/").pop() || fileName;
+        }
+      }
+    } catch (e) {
+      console.error("Enrichment failed during download:", e);
+    }
+
+    const result = await addSongFromPath(finalPath, fileName, 0);
     const fresh = await loadLibrary();
     setLibrary(fresh);
     if (result.alreadyExists) {
@@ -1261,9 +1306,6 @@ function App() {
           url,
           outputDir: folder,
           jobId: next.id,
-          title: next.title,
-          artist: next.artist,
-          coverUrl: next.coverUrl,
         });
 
         // Fast path: add to library without spamming toasts on bulk imports
@@ -1655,6 +1697,7 @@ function App() {
               onCreatePlaylistAndAdd={handleCreatePlaylistAndAdd}
               onRemoveSong={handleRemoveSong}
               onAddSongs={handleAddSongsClick}
+              onEnrichLibrary={() => setEnrichmentOpen(true)}
             />
           )}
           {currentView === "import" && (
@@ -1817,6 +1860,37 @@ function App() {
         isOpen={equalizerOpen}
         onClose={() => setEqualizerOpen(false)}
       />
+
+      {enrichmentOpen && (
+        <EnrichmentModal
+          songs={library.songs}
+          onClose={() => setEnrichmentOpen(false)}
+          onComplete={(updatedSongs) => {
+            if (updatedSongs.length > 0) {
+              setLibrary((prev) => {
+                const updates = new Map(updatedSongs.map((u) => [u.id, u]));
+                return {
+                  ...prev,
+                  songs: prev.songs.map((s) => {
+                    const u = updates.get(s.id);
+                    if (u) {
+                      return { 
+                        ...s, 
+                        title: u.title, 
+                        artist: u.artist, 
+                        album: u.album,
+                        path: u.newPath || s.path,
+                        fileName: u.newFileName || s.fileName,
+                      };
+                    }
+                    return s;
+                  }),
+                };
+              });
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

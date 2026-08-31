@@ -1823,9 +1823,6 @@ async fn yt_download(
     url: String,
     output_dir: String,
     job_id: String,
-    title: Option<String>,
-    artist: Option<String>,
-    cover_url: Option<String>,
 ) -> Result<String, String> {
     if url.trim().is_empty() {
         return Err("Empty URL".into());
@@ -1849,9 +1846,6 @@ async fn yt_download(
     let out_template2 = out_template.clone();
     let dir2 = dir.clone();
     let bin2 = bin.clone();
-    let title2 = title.clone();
-    let artist2 = artist.clone();
-    let cover_url2 = cover_url.clone();
 
     let result = tokio::task::spawn_blocking(move || {
         // Tell UI we're starting immediately
@@ -2018,31 +2012,7 @@ async fn yt_download(
                 .ok_or_else(|| "Download finished but file not found".to_string())?
         };
 
-        // ====== APPLY ID3 TAGS ======
-        if let Some(t) = &title2 {
-            let mut tag = id3::Tag::read_from_path(&final_path).unwrap_or_else(|_| id3::Tag::new());
-            tag.set_title(t);
-            if let Some(a) = &artist2 {
-                tag.set_artist(a);
-            }
 
-            if let Some(c) = &cover_url2 {
-                if let Ok(resp) = reqwest::blocking::get(c) {
-                    if let Ok(bytes) = resp.bytes() {
-                        let mime = if c.ends_with(".png") { "image/png" } else { "image/jpeg" };
-                        tag.add_frame(id3::frame::Picture {
-                            mime_type: mime.to_string(),
-                            picture_type: id3::frame::PictureType::CoverFront,
-                            description: "Cover".to_string(),
-                            data: bytes.to_vec(),
-                        });
-                    }
-                }
-            }
-
-            let _ = tag.write_to_path(&final_path, id3::Version::Id3v24);
-        }
-        // ==============================
 
         let _ = app2.emit(
             "yt-download-progress",
@@ -2107,7 +2077,8 @@ pub fn run() {
             resolve_spotify_link,
             parse_track_list_text,
             download_ffmpeg,
-            get_song_cover
+            get_song_cover,
+            write_song_tags
         ])
         .setup(|app| {
             let app_data = app.path().app_data_dir().expect("failed to get app data dir");
@@ -2202,6 +2173,72 @@ async fn download_ffmpeg(app: AppHandle) -> Result<String, String> {
     }
     
     Err("Could not find ffmpeg.exe in the downloaded archive".into())
+}
+
+#[tauri::command]
+async fn write_song_tags(
+    path: String,
+    title: Option<String>,
+    artist: Option<String>,
+    album: Option<String>,
+    cover_url: Option<String>,
+    rename_to: Option<String>,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut tag = id3::Tag::read_from_path(&path).unwrap_or_else(|_| id3::Tag::new());
+
+        if let Some(t) = &title {
+            tag.set_title(t);
+        }
+        if let Some(a) = &artist {
+            tag.set_artist(a);
+        }
+        if let Some(al) = &album {
+            tag.set_album(al);
+        }
+
+        if let Some(url) = &cover_url {
+            if let Ok(resp) = reqwest::blocking::get(url) {
+                if let Ok(bytes) = resp.bytes() {
+                    // Remove existing pictures first
+                    tag.remove_picture_by_type(id3::frame::PictureType::CoverFront);
+                    let mime = if url.ends_with(".png") { "image/png" } else { "image/jpeg" };
+                    tag.add_frame(id3::frame::Picture {
+                        mime_type: mime.to_string(),
+                        picture_type: id3::frame::PictureType::CoverFront,
+                        description: "Cover".to_string(),
+                        data: bytes.to_vec(),
+                    });
+                }
+            }
+        }
+
+        tag.write_to_path(&path, id3::Version::Id3v24)
+            .map_err(|e| format!("Failed to write tags: {}", e))?;
+            
+        let mut final_path = path.clone();
+        if let Some(new_name) = rename_to {
+            let old_path = PathBuf::from(&path);
+            if let Some(parent) = old_path.parent() {
+                let mut new_path = parent.join(&new_name);
+                // Preserve extension
+                if let Some(ext) = old_path.extension() {
+                    new_path.set_extension(ext);
+                }
+                
+                // Only rename if the new path doesn't exist or is the same file
+                if !new_path.exists() || new_path == old_path {
+                    if let Ok(_) = std::fs::rename(&old_path, &new_path) {
+                        final_path = new_path.to_string_lossy().to_string();
+                    }
+                }
+            }
+        }
+        
+        Ok(final_path)
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[tauri::command]

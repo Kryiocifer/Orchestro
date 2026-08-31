@@ -353,13 +353,15 @@ export default function NowPlayingView({
       <div className="relative flex flex-1 w-full overflow-hidden">
         {viewMode === "artwork" ? (
           <div className="flex h-full w-full items-center justify-center p-8">
-            <div className="aspect-square w-full max-w-sm overflow-hidden rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
-              {coverUrl || song.cover ? (
-                <img src={coverUrl || song.cover} alt={song.title} className="h-full w-full object-cover transition-opacity duration-500" />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center bg-[#282828] text-6xl">🎵</div>
-              )}
-            </div>
+            {coverUrl || song.cover ? (
+              <img 
+                src={coverUrl || song.cover} 
+                alt={song.title} 
+                className="max-h-full max-w-full rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] object-contain transition-opacity duration-500" 
+              />
+            ) : (
+              <div className="flex aspect-square w-full max-w-sm items-center justify-center rounded-xl bg-[#282828] text-6xl shadow-[0_20px_50px_rgba(0,0,0,0.5)]">🎵</div>
+            )}
           </div>
         ) : (
           <div className="relative flex h-full w-full flex-col items-center">

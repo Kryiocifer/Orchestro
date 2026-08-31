@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Song, Playlist } from "../lib/types";
-import { Play, Clock, Plus, Search, Check } from "lucide-react";
+import { Play, Clock, Plus, Search, Check, Sparkles } from "lucide-react";
 import { formatDuration } from "../lib/utils";
 import ContextMenu from "./ContextMenu";
 import { cn } from "../lib/utils";
@@ -17,6 +17,7 @@ interface LibraryViewProps {
   onCreatePlaylistAndAdd: (songIds: string[]) => void;
   onRemoveSong: (songIds: string[]) => void;
   onAddSongs: () => void;
+  onEnrichLibrary?: () => void;
 }
 
 function getSongFolder(song: Song, musicFolder?: string | null): string {
@@ -53,6 +54,7 @@ export default function LibraryView({
   onCreatePlaylistAndAdd,
   onRemoveSong,
   onAddSongs,
+  onEnrichLibrary,
 }: LibraryViewProps) {
   const [query, setQuery] = useState("");
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
@@ -216,6 +218,15 @@ export default function LibraryView({
             <Plus className="h-3.5 w-3.5" />
             Add
           </button>
+          {onEnrichLibrary && (
+            <button
+              onClick={onEnrichLibrary}
+              className="flex items-center gap-1.5 rounded-md border border-green-500/30 bg-green-500/10 px-3 py-1.5 text-sm text-green-400 transition hover:border-green-500/60 hover:bg-green-500/20"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              Fix Metadata
+            </button>
+          )}
         </div>
       </div>
 
