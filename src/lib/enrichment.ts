@@ -30,10 +30,9 @@ function needsEnrichment(song: Song): boolean {
 }
 
 /**
- * Extracts just the actual song name from a yt-dlp-style filename.
- * Handles both Indian pipe format and Western "Artist - Song" format.
+ * Extracts the song name and artist name from a yt-dlp-style filename.
  */
-function extractSongName(rawTitle: string): string {
+function extractMetadata(rawTitle: string): { songName: string; artistName: string } {
   let title = rawTitle
     .replace(/\s*\[[a-zA-Z0-9_-]{11}\]/g, "")
     .replace(/\.(mp3|flac|wav|m4a|aac|ogg|opus)$/i, "")
@@ -45,18 +44,24 @@ function extractSongName(rawTitle: string): string {
     .replace(/\(.*?(official|lyric|audio|video|live|amv|slowed|sped|visualizer).*?\)/gi, "")
     .replace(/\[.*?(official|lyric|audio|video|live|amv|slowed|sped|visualizer).*?\]/gi, "");
 
+  let songPart = "";
+  let artistPart = "";
+
   // Indian/yt-dlp pipe format
   if (/\||｜/.test(title)) {
     const parts = title.split(/\||｜/).map((p) => p.trim()).filter(Boolean);
-    let songPart: string;
-
     if (parts.length >= 2) {
       const p0Lower = parts[0].toLowerCase();
       if (/\bsongs?\b|\balbum\b|\bjukebox\b/i.test(p0Lower)) {
         songPart = parts[1];
       } else {
         const cleaned0 = stripYtFluff(parts[0]);
-        songPart = cleaned0.length > 0 ? cleaned0 : parts[1];
+        if (cleaned0.length > 0) {
+          songPart = cleaned0;
+          artistPart = parts[1];
+        } else {
+          songPart = parts[1];
+        }
       }
     } else {
       songPart = stripYtFluff(title);
@@ -68,36 +73,38 @@ function extractSongName(rawTitle: string): string {
       const dashParts = songPart.split(" - ");
       const leftWords = dashParts[0].trim().split(/\s+/).length;
       if (leftWords === 1 && dashParts[1]?.trim()) {
+        artistPart = dashParts[0].trim();
         songPart = dashParts[1].trim();
       }
     }
-
-    return songPart.trim();
-  }
-
-  // Western Format: "Artist - Song" or "Song - Artist"
-  if (title.includes(" - ")) {
+  } else if (title.includes(" - ")) {
+    // Western Format: "Artist - Song" or "Song - Artist"
     const dashIdx = title.indexOf(" - ");
     const left = title.substring(0, dashIdx).trim();
     let right = title.substring(dashIdx + 3).trim();
 
     // Specific check for "Song - Artist" if right side is clearly the artist
     if (/Cigarettes After Sex/i.test(right)) {
-      return stripYtFluff(left);
+      songPart = stripYtFluff(left);
+      artistPart = "Cigarettes After Sex";
+    } else {
+      // Default to right side being the song
+      artistPart = left;
+      right = right.replace(/\s*-[^-]*(official|lyric|audio|video|live|visualizer)[^-]*-?\s*/gi, "").trim();
+      right = stripYtFluff(right);
+      right = right.replace(/\s*(official|lyric|video|audio|visualizer)\s*$/gi, "");
+      songPart = right || stripYtFluff(title);
     }
-
-    // Default to right side being the song
-    right = right.replace(/\s*-[^-]*(official|lyric|audio|video|live|visualizer)[^-]*-?\s*/gi, "").trim();
-    right = stripYtFluff(right);
-    right = right.replace(/\s*(official|lyric|video|audio|visualizer)\s*$/gi, "");
-
-    if (right) {
-      return right;
-    }
+  } else {
+    // Fallback
+    songPart = stripYtFluff(title);
   }
 
-  // Fallback
-  return stripYtFluff(title);
+  // Final cleanup for random quotes, trailing underscores (e.g., _I can't move on_), or features
+  songPart = songPart.replace(/_.*?_/g, "").replace(/".*?"/g, "").replace(/_.*$/, "").trim();
+  songPart = stripYtFluff(songPart);
+
+  return { songName: songPart, artistName: artistPart };
 }
 
 function stripYtFluff(s: string): string {
@@ -129,6 +136,7 @@ function stripYtFluff(s: string): string {
     .replace(/\s*Best Part Slowed Reverb.*$/gi, "")
     .replace(/\s*-\s*gabinp.*$/gi, "")
     .replace(/\s*SuzumeTheme Song.*$/gi, "Suzume")
+    .replace(/\s*\(?(feat\.|ft\.).*?\)?\s*/gi, "") // Remove features
     .trim();
 }
 
@@ -161,7 +169,7 @@ export async function enrichSong(song: Song): Promise<EnrichmentResult> {
   }
 
   try {
-    const songName = extractSongName(song.title);
+    const { songName, artistName } = extractMetadata(song.title);
     if (!songName) {
       return {
         songId: song.id,
@@ -174,8 +182,9 @@ export async function enrichSong(song: Song): Promise<EnrichmentResult> {
       };
     }
 
+    const query = artistName ? `${songName} ${artistName}` : songName;
     const res = await fetch(
-      `https://itunes.apple.com/search?term=${encodeURIComponent(songName)}&entity=song&limit=5`
+      `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=5`
     );
     if (!res.ok) throw new Error(`iTunes HTTP ${res.status}`);
 
