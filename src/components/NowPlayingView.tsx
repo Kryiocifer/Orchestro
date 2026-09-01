@@ -214,8 +214,12 @@ export default function NowPlayingView({
             <img
               src={coverUrl || song.cover}
               alt=""
-              className="absolute inset-0 h-full w-full scale-110 object-cover transition-all duration-700"
-              style={{ filter: "blur(70px) brightness(0.3) saturate(1.2)" }}
+              className="absolute inset-0 h-full w-full scale-110 object-cover"
+              style={{ 
+                filter: "blur(40px) brightness(0.3) saturate(1.2)",
+                transform: "translateZ(0)",
+                willChange: "transform, filter" 
+              }}
             />
             <div className="absolute inset-0 bg-black/40" />
           </>

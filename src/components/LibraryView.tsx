@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import React, { useMemo, useState, useDeferredValue, useRef, useCallback } from "react";
 import { Song, Playlist } from "../lib/types";
 import { Play, Clock, Plus, Search, Check, Sparkles } from "lucide-react";
 import { formatDuration } from "../lib/utils";
@@ -42,6 +42,110 @@ function getSongFolder(song: Song, musicFolder?: string | null): string {
   return "Other";
 }
 
+interface LibrarySongRowProps {
+  song: Song;
+  index: number;
+  isCurrent: boolean;
+  isPlaying: boolean;
+  isSelected: boolean;
+  selectedCount: number;
+  onRowClick: (e: React.MouseEvent, song: Song, index: number) => void;
+  onContextMenu: (e: React.MouseEvent, songId: string) => void;
+  onCheckboxClick: (e: React.MouseEvent, songId: string) => void;
+}
+
+const LibrarySongRow = React.memo(({
+  song, index, isCurrent, isPlaying, isSelected, selectedCount, onRowClick, onContextMenu, onCheckboxClick
+}: LibrarySongRowProps) => {
+  return (
+    <div
+      onClick={(e) => onRowClick(e, song, index)}
+      onContextMenu={(e) => onContextMenu(e, song.id)}
+      className={cn(
+        "group grid cursor-pointer grid-cols-[auto_16px_4fr_3fr_2fr_minmax(120px,1fr)] gap-4 rounded-md px-4 py-2.5 text-sm transition select-none",
+        isSelected
+          ? "bg-white/20"
+          : "hover:bg-white/10"
+      )}
+    >
+      <div
+        className="flex w-6 items-center justify-center"
+        onClick={(e) => onCheckboxClick(e, song.id)}
+      >
+        <div
+          className={cn(
+            "flex h-4 w-4 items-center justify-center rounded border transition",
+            isSelected
+              ? "border-spotify-green bg-spotify-green text-black"
+              : "border-white/30 opacity-0 group-hover:opacity-100",
+            selectedCount > 0 && !isSelected && "opacity-100"
+          )}
+        >
+          {isSelected && <Check className="h-3 w-3" strokeWidth={3} />}
+        </div>
+      </div>
+
+      <div className="flex items-center text-spotify-lightgray">
+        {isCurrent && isPlaying ? (
+          <span className="text-spotify-green">♫</span>
+        ) : (
+          <>
+            <span className="group-hover:hidden">{index + 1}</span>
+            <Play className="hidden h-4 w-4 fill-white group-hover:block" />
+          </>
+        )}
+      </div>
+
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded bg-spotify-gray">
+          {song.cover ? (
+            <img
+              src={song.cover}
+              alt=""
+              loading="lazy"
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span className="text-lg">🎵</span>
+          )}
+        </div>
+        <div className="min-w-0">
+          <p
+            className={cn(
+              "truncate font-medium",
+              isCurrent && "text-spotify-green"
+            )}
+          >
+            {song.title}
+          </p>
+          <p className="truncate text-spotify-lightgray">
+            {song.artist}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center truncate text-spotify-lightgray">
+        {song.album}
+      </div>
+
+      <div className="flex items-center text-spotify-lightgray">
+        {new Date(song.addedAt).toLocaleDateString()}
+      </div>
+
+      <div className="flex items-center justify-end text-spotify-lightgray">
+        {formatDuration(song.duration)}
+      </div>
+    </div>
+  );
+}, (prev, next) => {
+  return prev.song.id === next.song.id &&
+         prev.index === next.index &&
+         prev.isCurrent === next.isCurrent &&
+         prev.isPlaying === next.isPlaying &&
+         prev.isSelected === next.isSelected &&
+         prev.selectedCount === next.selectedCount;
+});
+
 export default function LibraryView({
   songs,
   playlists,
@@ -57,6 +161,7 @@ export default function LibraryView({
   onEnrichLibrary,
 }: LibraryViewProps) {
   const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [lastClickedId, setLastClickedId] = useState<string | null>(null);
@@ -97,7 +202,7 @@ export default function LibraryView({
   };
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     let result = folderFilteredSongs.map((song, index) => ({ song, originalIndex: index }));
     
     if (q) {
@@ -137,7 +242,7 @@ export default function LibraryView({
     }
 
     return result.map((r) => r.song);
-  }, [folderFilteredSongs, query, sortConfig]);
+  }, [folderFilteredSongs, deferredQuery, sortConfig]);
 
   const handleRowClick = (e: React.MouseEvent, song: Song, index: number) => {
     // Shift → range select from anchor
@@ -186,6 +291,30 @@ export default function LibraryView({
     }
     setContextMenu({ x: e.clientX, y: e.clientY, songIds: ids });
   };
+
+  const handleCheckboxClick = (e: React.MouseEvent, songId: string) => {
+    e.stopPropagation();
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(songId)) next.delete(songId);
+      else next.add(songId);
+      return next;
+    });
+    setLastClickedId(songId);
+  };
+
+  // Stable callbacks for memoized rows
+  const handleRowClickRef = useRef(handleRowClick);
+  handleRowClickRef.current = handleRowClick;
+  const onRowClickStable = useCallback((e: React.MouseEvent, song: Song, index: number) => handleRowClickRef.current(e, song, index), []);
+
+  const handleContextMenuRef = useRef(handleContextMenu);
+  handleContextMenuRef.current = handleContextMenu;
+  const onContextMenuStable = useCallback((e: React.MouseEvent, songId: string) => handleContextMenuRef.current(e, songId), []);
+
+  const handleCheckboxClickRef = useRef(handleCheckboxClick);
+  handleCheckboxClickRef.current = handleCheckboxClick;
+  const onCheckboxClickStable = useCallback((e: React.MouseEvent, songId: string) => handleCheckboxClickRef.current(e, songId), []);
 
   return (
     <div className="p-8">
@@ -328,94 +457,18 @@ export default function LibraryView({
               const isCurrent = song.id === currentSongId;
               const isSelected = selected.has(song.id);
               return (
-                <div
+                <LibrarySongRow
                   key={song.id}
-                  onClick={(e) => handleRowClick(e, song, index)}
-                  onContextMenu={(e) => handleContextMenu(e, song.id)}
-                  className={cn(
-                    "group grid cursor-pointer grid-cols-[auto_16px_4fr_3fr_2fr_minmax(120px,1fr)] gap-4 rounded-md px-4 py-2.5 text-sm transition select-none",
-                    isSelected
-                      ? "bg-white/20"
-                      : "hover:bg-white/10"
-                  )}
-                >
-                  {/* Checkbox — visible when selection active or row hovered */}
-                  <div
-                    className="flex w-6 items-center justify-center"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelected((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(song.id)) next.delete(song.id);
-                        else next.add(song.id);
-                        return next;
-                      });
-                      setLastClickedId(song.id);
-                    }}
-                  >
-                    <div
-                      className={cn(
-                        "flex h-4 w-4 items-center justify-center rounded border transition",
-                        isSelected
-                          ? "border-spotify-green bg-spotify-green text-black"
-                          : "border-white/30 opacity-0 group-hover:opacity-100",
-                        selected.size > 0 && !isSelected && "opacity-100"
-                      )}
-                    >
-                      {isSelected && <Check className="h-3 w-3" strokeWidth={3} />}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center text-spotify-lightgray">
-                    {isCurrent && isPlaying ? (
-                      <span className="text-spotify-green">♫</span>
-                    ) : (
-                      <>
-                        <span className="group-hover:hidden">{index + 1}</span>
-                        <Play className="hidden h-4 w-4 fill-white group-hover:block" />
-                      </>
-                    )}
-                  </div>
-
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded bg-spotify-gray">
-                      {song.cover ? (
-                        <img
-                          src={song.cover}
-                          alt=""
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <span className="text-lg">🎵</span>
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <p
-                        className={cn(
-                          "truncate font-medium",
-                          isCurrent && "text-spotify-green"
-                        )}
-                      >
-                        {song.title}
-                      </p>
-                      <p className="truncate text-spotify-lightgray">
-                        {song.artist}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center truncate text-spotify-lightgray">
-                    {song.album}
-                  </div>
-
-                  <div className="flex items-center text-spotify-lightgray">
-                    {new Date(song.addedAt).toLocaleDateString()}
-                  </div>
-
-                  <div className="flex items-center justify-end text-spotify-lightgray">
-                    {formatDuration(song.duration)}
-                  </div>
-                </div>
+                  song={song}
+                  index={index}
+                  isCurrent={isCurrent}
+                  isPlaying={isPlaying}
+                  isSelected={isSelected}
+                  selectedCount={selected.size}
+                  onRowClick={onRowClickStable}
+                  onContextMenu={onContextMenuStable}
+                  onCheckboxClick={onCheckboxClickStable}
+                />
               );
             })}
           </div>

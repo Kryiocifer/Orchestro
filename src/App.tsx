@@ -8,11 +8,12 @@ import PlayerBar, { RepeatMode } from "./components/PlayerBar";
 import LibraryView from "./components/LibraryView";
 import PlaylistView from "./components/PlaylistView";
 import HomeView from "./components/HomeView";
-import YouTubeView from "./components/YouTubeView";
-import ImportView from "./components/ImportView";
-import DownloadPanel, { DownloadJob } from "./components/DownloadPanel";
+import { Suspense, lazy } from "react";
 import NowPlayingView from "./components/NowPlayingView";
-import EqualizerModal from "./components/EqualizerModal";
+const YouTubeView = lazy(() => import("./components/YouTubeView"));
+const ImportView = lazy(() => import("./components/ImportView"));
+const DownloadPanel = lazy(() => import("./components/DownloadPanel"));
+const EqualizerModal = lazy(() => import("./components/EqualizerModal"));
 import { equalizerEngine } from "./lib/equalizer";
 import {
   loadLibrary,
@@ -36,7 +37,10 @@ import { enrichSong, applyEnrichment } from "./lib/enrichment";
 import { Song, LibraryData, View, SavedPlaybackState } from "./lib/types";
 import { isAudioFile } from "./lib/utils";
 import { fetchRemoteCoverArt } from "./lib/metadata";
-import EnrichmentModal from "./components/EnrichmentModal";
+const EnrichmentModal = lazy(() => import("./components/EnrichmentModal"));
+import type { DownloadJob } from "./components/DownloadPanel";
+
+const coverCache = new Map<string, string | null>();
 
 function App() {
   const [library, setLibrary] = useState<LibraryData>({
@@ -206,12 +210,19 @@ function App() {
       setCurrentCoverUrl(null);
       return;
     }
+
+    if (coverCache.has(currentSong.path)) {
+      setCurrentCoverUrl(coverCache.get(currentSong.path)!);
+      return;
+    }
+
     let active = true;
     invoke<string | null>("get_song_cover", { path: currentSong.path })
       .then(async (b64) => {
         if (!active) return;
         if (b64) {
           // Embedded ID3 art found — use it directly
+          coverCache.set(currentSong.path, b64);
           setCurrentCoverUrl(b64);
         } else {
           // No embedded art — fetch from iTunes (free, no key)
@@ -219,7 +230,10 @@ function App() {
             currentSong.title,
             currentSong.artist
           );
-          if (active) setCurrentCoverUrl(remote);
+          if (active) {
+            coverCache.set(currentSong.path, remote);
+            setCurrentCoverUrl(remote);
+          }
         }
       })
       .catch(async () => {
@@ -228,7 +242,10 @@ function App() {
           currentSong.title,
           currentSong.artist
         );
-        if (active) setCurrentCoverUrl(remote);
+        if (active) {
+          coverCache.set(currentSong.path, remote);
+          setCurrentCoverUrl(remote);
+        }
       });
     return () => { active = false; };
   }, [currentSong]);
@@ -340,7 +357,7 @@ function App() {
         const prog = (audio.currentTime / audio.duration) * 100;
         setProgress(prog);
         const now = Date.now();
-        if (now - lastSaveTimeRef.current > 1500) {
+        if (now - lastSaveTimeRef.current > 5000) {
           lastSaveTimeRef.current = now;
           saveSessionStateRef.current({
             position: audio.currentTime,
@@ -470,7 +487,9 @@ function App() {
         audio.removeAttribute("src");
         audio.load();
 
-        console.log("Playing:", song.title, "path:", song.path, "startTime:", startTime);
+        if (import.meta.env.DEV) {
+          console.log("Playing:", song.title, "path:", song.path, "startTime:", startTime);
+        }
 
         // Read file as base64 data URL via Rust — avoids WebKitGTK blob/asset:// GLib crashes
         const dataUrl = await invoke<string>("read_audio_base64", { path: song.path });
@@ -806,12 +825,14 @@ function App() {
       queueRef.current = q;
       setQueue(q);
       saveSessionStateRef.current({ queueSongIds: q.map((s) => s.id) });
-      console.log(
-        "Shuffle",
-        next ? "ON" : "OFF",
-        "→ queue:",
-        q.slice(0, 6).map((s) => s.title)
-      );
+      if (import.meta.env.DEV) {
+        console.log(
+          "Shuffle",
+          next ? "ON" : "OFF",
+          "→ queue:",
+          q.slice(0, 6).map((s) => s.title)
+        );
+      }
     }
   }, [library.songs, buildQueue]);
 
@@ -1753,26 +1774,30 @@ function App() {
             />
           )}
           {currentView === "import" && (
-            <ImportView
-              downloadFolder={library.downloadFolder}
-              onPickDownloadFolder={handlePickDownloadFolder}
-              jobs={downloadJobs}
-              setJobs={setDownloadJobs}
-              spotifyClientId={library.spotifyClientId}
-              onSaveSpotifyClientId={async (id) => {
-                const fresh = await setSpotifyCredentials(id, null);
-                setLibrary(fresh);
-              }}
-            />
+            <Suspense fallback={<div className="p-8 text-spotify-lightgray">Loading...</div>}>
+              <ImportView
+                downloadFolder={library.downloadFolder}
+                onPickDownloadFolder={handlePickDownloadFolder}
+                jobs={downloadJobs}
+                setJobs={setDownloadJobs}
+                spotifyClientId={library.spotifyClientId}
+                onSaveSpotifyClientId={async (id) => {
+                  const fresh = await setSpotifyCredentials(id, null);
+                  setLibrary(fresh);
+                }}
+              />
+            </Suspense>
           )}
           {currentView === "youtube" && (
-            <YouTubeView
-              downloadFolder={library.downloadFolder}
-              onPickDownloadFolder={handlePickDownloadFolder}
-              onDownloaded={handleYtDownloaded}
-              jobs={downloadJobs}
-              setJobs={setDownloadJobs}
-            />
+            <Suspense fallback={<div className="p-8 text-spotify-lightgray">Loading...</div>}>
+              <YouTubeView
+                downloadFolder={library.downloadFolder}
+                onPickDownloadFolder={handlePickDownloadFolder}
+                onDownloaded={handleYtDownloaded}
+                jobs={downloadJobs}
+                setJobs={setDownloadJobs}
+              />
+            </Suspense>
           )}
           {currentView === "playlist" && activePlaylist && (
             <PlaylistView
@@ -1799,64 +1824,66 @@ function App() {
         </main>
       </div>
 
-      <DownloadPanel
-        jobs={downloadJobs}
-        open={downloadPanelOpen}
-        onToggle={() => setDownloadPanelOpen((o) => !o)}
-        onClose={() => setDownloadPanelOpen(false)}
-        onClearDone={() =>
-          setDownloadJobs((prev) =>
-            prev.filter(
-              (j) =>
-                j.status !== "done" &&
-                j.status !== "error" &&
-                j.status !== "cancelled"
+      <Suspense fallback={null}>
+        <DownloadPanel
+          jobs={downloadJobs}
+          open={downloadPanelOpen}
+          onToggle={() => setDownloadPanelOpen((o) => !o)}
+          onClose={() => setDownloadPanelOpen(false)}
+          onClearDone={() =>
+            setDownloadJobs((prev) =>
+              prev.filter(
+                (j) =>
+                  j.status !== "done" &&
+                  j.status !== "error" &&
+                  j.status !== "cancelled"
+              )
             )
-          )
-        }
-        onCancel={async (jobId) => {
-          try {
-            const { invoke } = await import("@tauri-apps/api/core");
+          }
+          onCancel={async (jobId) => {
+            try {
+              const { invoke } = await import("@tauri-apps/api/core");
+              setDownloadJobs((prev) =>
+                prev.map((j) =>
+                  j.id === jobId
+                    ? { ...j, status: "cancelled" as const, message: "Cancelled" }
+                    : j
+                )
+              );
+              await invoke("yt_download_cancel", { jobId });
+            } catch (err) {
+              console.error("Cancel failed:", err);
+            }
+          }}
+          onCancelAll={async () => {
+            const active = downloadJobs.filter(
+              (j) =>
+                j.status === "queued" ||
+                j.status === "downloading" ||
+                j.status === "converting"
+            );
             setDownloadJobs((prev) =>
               prev.map((j) =>
-                j.id === jobId
+                j.status === "queued" ||
+                  j.status === "downloading" ||
+                  j.status === "converting"
                   ? { ...j, status: "cancelled" as const, message: "Cancelled" }
                   : j
               )
             );
-            await invoke("yt_download_cancel", { jobId });
-          } catch (err) {
-            console.error("Cancel failed:", err);
-          }
-        }}
-        onCancelAll={async () => {
-          const active = downloadJobs.filter(
-            (j) =>
-              j.status === "queued" ||
-              j.status === "downloading" ||
-              j.status === "converting"
-          );
-          setDownloadJobs((prev) =>
-            prev.map((j) =>
-              j.status === "queued" ||
-                j.status === "downloading" ||
-                j.status === "converting"
-                ? { ...j, status: "cancelled" as const, message: "Cancelled" }
-                : j
-            )
-          );
-          try {
-            const { invoke } = await import("@tauri-apps/api/core");
-            await Promise.all(
-              active.map((j) =>
-                invoke("yt_download_cancel", { jobId: j.id }).catch(() => null)
-              )
-            );
-          } catch (err) {
-            console.error("Stop all failed:", err);
-          }
-        }}
-      />
+            try {
+              const { invoke } = await import("@tauri-apps/api/core");
+              await Promise.all(
+                active.map((j) =>
+                  invoke("yt_download_cancel", { jobId: j.id }).catch(() => null)
+                )
+              );
+            } catch (err) {
+              console.error("Stop all failed:", err);
+            }
+          }}
+        />
+      </Suspense>
 
       {showNowPlaying && currentSong && (
         <NowPlayingView
@@ -1908,40 +1935,46 @@ function App() {
         onOpenEqualizer={() => setEqualizerOpen(true)}
       />
 
-      <EqualizerModal
-        isOpen={equalizerOpen}
-        onClose={() => setEqualizerOpen(false)}
-      />
+      {equalizerOpen && (
+        <Suspense fallback={null}>
+          <EqualizerModal
+            isOpen={equalizerOpen}
+            onClose={() => setEqualizerOpen(false)}
+          />
+        </Suspense>
+      )}
 
       {enrichmentOpen && (
-        <EnrichmentModal
-          songs={library.songs}
-          onClose={() => setEnrichmentOpen(false)}
-          onComplete={(updatedSongs) => {
-            if (updatedSongs.length > 0) {
-              setLibrary((prev) => {
-                const updates = new Map(updatedSongs.map((u) => [u.id, u]));
-                return {
-                  ...prev,
-                  songs: prev.songs.map((s) => {
-                    const u = updates.get(s.id);
-                    if (u) {
-                      return {
-                        ...s,
-                        title: u.title,
-                        artist: u.artist,
-                        album: u.album,
-                        path: u.newPath || s.path,
-                        fileName: u.newFileName || s.fileName,
-                      };
-                    }
-                    return s;
-                  }),
-                };
-              });
-            }
-          }}
-        />
+        <Suspense fallback={null}>
+          <EnrichmentModal
+            songs={library.songs}
+            onClose={() => setEnrichmentOpen(false)}
+            onComplete={(updatedSongs) => {
+              if (updatedSongs.length > 0) {
+                setLibrary((prev) => {
+                  const updates = new Map(updatedSongs.map((u) => [u.id, u]));
+                  return {
+                    ...prev,
+                    songs: prev.songs.map((s) => {
+                      const u = updates.get(s.id);
+                      if (u) {
+                        return {
+                          ...s,
+                          title: u.title,
+                          artist: u.artist,
+                          album: u.album,
+                          path: u.newPath || s.path,
+                          fileName: u.newFileName || s.fileName,
+                        };
+                      }
+                      return s;
+                    }),
+                  };
+                });
+              }
+            }}
+          />
+        </Suspense>
       )}
     </div>
   );
