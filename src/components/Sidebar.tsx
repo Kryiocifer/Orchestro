@@ -11,6 +11,7 @@ import {
   FileAudio,
   Youtube,
   Link2,
+  Download,
 } from "lucide-react";
 import { Playlist, View } from "../lib/types";
 import { cn } from "../lib/utils";
@@ -30,6 +31,8 @@ interface SidebarProps {
   onImportPlaylist: () => void;
   downloadFolder?: string | null;
   onPickDownloadFolder: () => void;
+  onCheckUpdates?: () => void;
+  checkingUpdates?: boolean;
 }
 
 export default function Sidebar({
@@ -47,6 +50,8 @@ export default function Sidebar({
   onImportPlaylist,
   downloadFolder,
   onPickDownloadFolder,
+  onCheckUpdates,
+  checkingUpdates,
 }: SidebarProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -152,6 +157,18 @@ export default function Sidebar({
               {dlLabel || "Set download folder…"}
             </span>
           </button>
+          {onCheckUpdates && (
+            <button
+              onClick={onCheckUpdates}
+              disabled={checkingUpdates}
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-spotify-lightgray transition hover:bg-white/5 hover:text-white disabled:opacity-50"
+            >
+              <Download
+                className={cn("h-4 w-4 shrink-0 opacity-80", checkingUpdates && "animate-pulse")}
+              />
+              {checkingUpdates ? "Checking…" : "Check for updates"}
+            </button>
+          )}
         </div>
 
         {/* Playlists */}

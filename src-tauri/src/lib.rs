@@ -50,6 +50,8 @@ pub struct YtSearchResult {
     pub uploader: String,
     pub duration: Option<f64>,
     pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub playlist_title: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -1748,6 +1750,60 @@ fn parse_track_list_text(text: String) -> Result<SpotifyPlaylistResult, String> 
     })
 }
 
+fn is_youtube_url(q: &str) -> bool {
+    let l = q.to_ascii_lowercase();
+    l.contains("youtube.com/") || l.contains("youtu.be/") || l.contains("music.youtube.com/")
+}
+
+fn parse_yt_print_lines(stdout: &str, max: usize) -> Vec<YtSearchResult> {
+    let mut results = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for line in stdout.lines() {
+        if results.len() >= max {
+            break;
+        }
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() < 5 {
+            continue;
+        }
+        let id = parts[0].trim();
+        if id.is_empty() || id == "NA" || !seen.insert(id.to_string()) {
+            continue;
+        }
+        // Skip playlist/channel rows that aren't videos
+        if id.starts_with("PL") && id.len() > 13 {
+            continue;
+        }
+        let duration = parts[3].parse::<f64>().ok().filter(|d| *d > 0.0);
+        let mut url = parts[4].to_string();
+        if url.is_empty() || url == "NA" {
+            url = format!("https://www.youtube.com/watch?v={}", id);
+        }
+        let playlist_title = parts
+            .get(5)
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty() && *s != "NA")
+            .map(|s| s.to_string());
+        results.push(YtSearchResult {
+            id: id.to_string(),
+            title: parts[1].to_string(),
+            uploader: if parts[2] == "NA" {
+                "Unknown".into()
+            } else {
+                parts[2].to_string()
+            },
+            duration,
+            url,
+            playlist_title,
+        });
+    }
+    results
+}
+
 #[tauri::command]
 async fn yt_search(app: AppHandle, query: String) -> Result<Vec<YtSearchResult>, String> {
     let q = query.trim();
@@ -1756,20 +1812,31 @@ async fn yt_search(app: AppHandle, query: String) -> Result<Vec<YtSearchResult>,
     }
 
     let bin = resolve_ytdlp(&app)?;
-    let search = format!("ytsearch8:{}", q);
+    let target = if is_youtube_url(q) {
+        q.to_string()
+    } else {
+        format!("ytsearch8:{}", q)
+    };
+
     let mut cmd = tokio::process::Command::new(&bin);
     hide_console_tokio(&mut cmd);
+    // Playlist / watch URLs: list every entry. Text search: first 8 hits.
+    let mut args = vec![
+        target.as_str(),
+        "--flat-playlist",
+        "--print",
+        "%(id)s\t%(title)s\t%(uploader,channel,creator|Unknown)s\t%(duration|0)s\t%(webpage_url,url)s\t%(playlist_title|)s",
+        "--no-warnings",
+        "--socket-timeout",
+        "20",
+    ];
+    if !is_youtube_url(q) {
+        args.push("--no-playlist");
+    } else {
+        args.push("--yes-playlist");
+    }
     let output = cmd
-        .args([
-            &search,
-            "--flat-playlist",
-            "--print",
-            "%(id)s\t%(title)s\t%(uploader,channel,creator|Unknown)s\t%(duration|0)s\t%(webpage_url,url)s",
-            "--no-warnings",
-            "--no-playlist",
-            "--socket-timeout",
-            "15",
-        ])
+        .args(&args)
         .output()
         .await
         .map_err(|e| {
@@ -1785,35 +1852,10 @@ async fn yt_search(app: AppHandle, query: String) -> Result<Vec<YtSearchResult>,
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut results = Vec::new();
-
-    for line in stdout.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() < 5 {
-            continue;
-        }
-        let duration = parts[3].parse::<f64>().ok().filter(|d| *d > 0.0);
-        let mut url = parts[4].to_string();
-        if url.is_empty() || url == "NA" {
-            url = format!("https://www.youtube.com/watch?v={}", parts[0]);
-        }
-        results.push(YtSearchResult {
-            id: parts[0].to_string(),
-            title: parts[1].to_string(),
-            uploader: if parts[2] == "NA" {
-                "Unknown".into()
-            } else {
-                parts[2].to_string()
-            },
-            duration,
-            url,
-        });
+    let results = parse_yt_print_lines(&stdout, 500);
+    if results.is_empty() {
+        return Err("No videos found in that link / search".into());
     }
-
     Ok(results)
 }
 
@@ -2032,6 +2074,58 @@ async fn yt_download(
     result
 }
 
+fn is_audio_ext(name: &str) -> bool {
+    matches!(
+        Path::new(name)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .as_deref(),
+        Some("mp3" | "flac" | "wav" | "ogg" | "m4a" | "aac" | "wma" | "opus" | "aiff" | "aif")
+    )
+}
+
+/// Bypass plugin-fs scope — works on Z: / mapped drives after restart
+#[tauri::command]
+fn path_exists(path: String) -> bool {
+    let p = PathBuf::from(path.trim());
+    p.exists() && p.is_file()
+}
+
+/// Recursive audio listing via std::fs (no Tauri scope). Cap 5000.
+#[tauri::command]
+fn list_audio_files(root: String) -> Result<Vec<String>, String> {
+    let root = PathBuf::from(root.trim());
+    if !root.is_dir() {
+        return Err(format!("Not a folder: {}", root.display()));
+    }
+    let mut out = Vec::new();
+    let mut stack = vec![root];
+    while let Some(dir) = stack.pop() {
+        if out.len() >= 5000 {
+            break;
+        }
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') {
+                continue;
+            }
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.is_file() && is_audio_ext(&name) {
+                out.push(path.to_string_lossy().to_string());
+            }
+        }
+    }
+    Ok(out)
+}
+
 fn find_newest_mp3(dir: &PathBuf) -> Option<String> {
     let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
     let entries = std::fs::read_dir(dir).ok()?;
@@ -2056,6 +2150,8 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             yt_search,
             yt_download,
@@ -2078,7 +2174,9 @@ pub fn run() {
             parse_track_list_text,
             download_ffmpeg,
             get_song_cover,
-            write_song_tags
+            write_song_tags,
+            path_exists,
+            list_audio_files
         ])
         .setup(|app| {
             let app_data = app.path().app_data_dir().expect("failed to get app data dir");
@@ -2220,15 +2318,24 @@ async fn write_song_tags(
         if let Some(new_name) = rename_to {
             let old_path = PathBuf::from(&path);
             if let Some(parent) = old_path.parent() {
-                let mut new_path = parent.join(&new_name);
-                // Preserve extension
-                if let Some(ext) = old_path.extension() {
-                    new_path.set_extension(ext);
+                // Don't use Path::set_extension — "30. Title - Artist" would become "30.mp3"
+                let ext = old_path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("mp3");
+                let mut stem = new_name.trim().to_string();
+                let ext_suffix = format!(".{}", ext);
+                if stem.to_lowercase().ends_with(&ext_suffix.to_lowercase()) {
+                    stem.truncate(stem.len() - ext_suffix.len());
                 }
-                
-                // Only rename if the new path doesn't exist or is the same file
-                if !new_path.exists() || new_path == old_path {
-                    if let Ok(_) = std::fs::rename(&old_path, &new_path) {
+                stem = stem.trim().to_string();
+                if !stem.is_empty() {
+                    let new_path = parent.join(format!("{}.{}", stem, ext));
+                    if new_path != old_path && !new_path.exists() {
+                        if std::fs::rename(&old_path, &new_path).is_ok() {
+                            final_path = new_path.to_string_lossy().to_string();
+                        }
+                    } else if new_path == old_path {
                         final_path = new_path.to_string_lossy().to_string();
                     }
                 }

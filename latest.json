@@ -1,0 +1,11 @@
+{
+  "notes": "Orchestro 2.3.0",
+  "pub_date": "2026-09-01T07.14.28Z",
+  "version": "2.3.0",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRMHdPNlhtSFNKRmYyMlZjajkwYXR4OU1IYktUK2txV0ZLNWpHNE9ZUDdPaXVYM0ZzZHdGZU1BT3ZDaGhIeFRKSDNpVDBLNmEwMjNsN3hCeHhXVXN4ejJXMnRxRGVTb1FFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4MjQ1OTgwCWZpbGU6T3JjaGVzdHJvXzIuMy4wX3g2NC1zZXR1cC5leGUKb3padURhSjJhNG9oM1Rkc2lMZENRZjQ5N2FoSTFkM2psbGhNSXhEMHVTYnpTWFE0NTMxR1pscVkzVzRianhjUUpBV3BheDM5YWIrenZyNTlpbUR3Q1E9PQo=",
+      "url": "https://github.com/Kryiocifer/Orchestro/releases/download/v2.3.0/Orchestro_2.3.0_x64-setup.exe"
+    }
+  }
+}

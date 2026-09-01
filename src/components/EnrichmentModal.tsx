@@ -45,7 +45,7 @@ export default function EnrichmentModal({ songs, onClose, onComplete }: Props) {
       const song = songs[i];
       const result = await enrichSong(song);
 
-      if (result.status === "updated" && !cancelRef.current) {
+      if ((result.status === "updated" || result.status === "cleaned") && !cancelRef.current) {
         try {
           const newPath = await applyEnrichment(song, result);
           let newFileName;
@@ -66,10 +66,11 @@ export default function EnrichmentModal({ songs, onClose, onComplete }: Props) {
         }
       }
 
-      setLog((prev) => [
-        ...prev,
-        { ...result, songTitle: song.title },
-      ]);
+      setLog((prev) => {
+        const next = [...prev, { ...result, songTitle: song.title }];
+        // Cap log so huge libraries don't grow RAM
+        return next.length > 200 ? next.slice(-200) : next;
+      });
       setProgress(i + 1);
 
       // Rate limit: 500ms between requests
@@ -86,6 +87,7 @@ export default function EnrichmentModal({ songs, onClose, onComplete }: Props) {
   const statusIcon = (status: EnrichmentResult["status"]) => {
     switch (status) {
       case "updated": return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-400" />;
+      case "cleaned": return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-sky-400" />;
       case "skipped": return <SkipForward className="h-3.5 w-3.5 shrink-0 text-white/30" />;
       case "no_match": return <XCircle className="h-3.5 w-3.5 shrink-0 text-yellow-400" />;
       case "error": return <XCircle className="h-3.5 w-3.5 shrink-0 text-red-400" />;
@@ -95,13 +97,14 @@ export default function EnrichmentModal({ songs, onClose, onComplete }: Props) {
   const statusLabel = (entry: LogEntry) => {
     switch (entry.status) {
       case "updated": return <span className="text-green-400">→ {entry.title} · {entry.artist}</span>;
+      case "cleaned": return <span className="text-sky-400">Renamed (no iTunes match) — {entry.title}</span>;
       case "skipped": return <span className="text-white/30">Skipped — {entry.reason}</span>;
       case "no_match": return <span className="text-yellow-400">No match — {entry.reason}</span>;
       case "error": return <span className="text-red-400">Error — {entry.reason}</span>;
     }
   };
 
-  const updated = log.filter((l) => l.status === "updated").length;
+  const updated = log.filter((l) => l.status === "updated" || l.status === "cleaned").length;
   const skipped = log.filter((l) => l.status === "skipped").length;
   const noMatch = log.filter((l) => l.status === "no_match" || l.status === "error").length;
 

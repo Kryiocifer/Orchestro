@@ -58,6 +58,7 @@ function App() {
   const [showNowPlaying, setShowNowPlaying] = useState(false);
   const [equalizerOpen, setEqualizerOpen] = useState(false);
   const [enrichmentOpen, setEnrichmentOpen] = useState(false);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
   useEffect(() => {
     if (downloadJobs.some((j) => j.status === "downloading" || j.status === "queued" || j.status === "converting")) {
       setDownloadPanelOpen(true);
@@ -72,16 +73,16 @@ function App() {
   const shuffleRef = useRef(false);
   const repeatRef = useRef<RepeatMode>("all");
   const originalQueueRef = useRef<Song[]>([]);
-  const loadAndPlayRef = useRef<(song: Song, q?: Song[], startTime?: number) => Promise<void>>(async () => {});
+  const loadAndPlayRef = useRef<(song: Song, q?: Song[], startTime?: number) => Promise<void>>(async () => { });
   const isAddingRef = useRef(false);
   const playGenRef = useRef(0);
   const isSwitchingRef = useRef(false);
-  const playNextRef = useRef<() => void>(() => {});
-  const playPreviousRef = useRef<() => void>(() => {});
-  const togglePlayRef = useRef<() => void>(() => {});
+  const playNextRef = useRef<() => void>(() => { });
+  const playPreviousRef = useRef<() => void>(() => { });
+  const togglePlayRef = useRef<() => void>(() => { });
   const savedPositionRef = useRef(0);
   const lastSaveTimeRef = useRef(0);
-  const saveSessionStateRef = useRef<(override?: Partial<SavedPlaybackState>) => void>(() => {});
+  const saveSessionStateRef = useRef<(override?: Partial<SavedPlaybackState>) => void>(() => { });
 
   const saveSessionState = useCallback(
     (override?: Partial<SavedPlaybackState>) => {
@@ -97,17 +98,17 @@ function App() {
         override?.position !== undefined
           ? override.position
           : audio && !isNaN(audio.currentTime) && audio.currentTime > 0
-          ? audio.currentTime
-          : savedPositionRef.current;
+            ? audio.currentTime
+            : savedPositionRef.current;
 
       const progressVal =
         override?.progress !== undefined
           ? override.progress
           : audio && audio.duration && !isNaN(audio.duration) && audio.duration > 0
-          ? (position / audio.duration) * 100
-          : curr.duration > 0
-          ? (position / curr.duration) * 100
-          : 0;
+            ? (position / audio.duration) * 100
+            : curr.duration > 0
+              ? (position / curr.duration) * 100
+              : 0;
 
       const queueIds =
         override?.queueSongIds !== undefined
@@ -128,8 +129,8 @@ function App() {
           origQueueIds.length > 0
             ? origQueueIds
             : queueIds.length > 0
-            ? queueIds
-            : [curr.id],
+              ? queueIds
+              : [curr.id],
         volume: override?.volume !== undefined ? override.volume : volume,
         shuffle:
           override?.shuffle !== undefined ? override.shuffle : shuffleRef.current,
@@ -141,7 +142,7 @@ function App() {
 
       try {
         localStorage.setItem("orchestro_last_session", JSON.stringify(state));
-      } catch {}
+      } catch { }
     },
     [library.songs, volume]
   );
@@ -329,7 +330,7 @@ function App() {
     const audio = new Audio();
     audio.volume = volume;
     audioRef.current = audio;
-    
+
     // Connect to Equalizer Engine
     equalizerEngine.connectMediaElement(audio);
 
@@ -434,7 +435,7 @@ function App() {
   const loadAndPlay = useCallback(
     async (song: Song, newQueue?: Song[], startTime: number = 0) => {
       if (!audioRef.current) return;
-      
+
       // Initialize/resume AudioContext synchronously here to capture the user gesture token
       equalizerEngine.initContext();
 
@@ -445,7 +446,7 @@ function App() {
       // Stop current playback immediately so UI doesn't fight the old track
       try {
         audio.pause();
-      } catch {}
+      } catch { }
       setProgress(song.duration > 0 ? (startTime / song.duration) * 100 : 0);
       setCurrentSong(song);
       currentSongRef.current = song;
@@ -736,7 +737,7 @@ function App() {
       // stop cleanly + hint to enable repeat
       try {
         audioRef.current?.pause();
-      } catch {}
+      } catch { }
       setIsPlaying(false);
       setProgress(0);
       toast("End of playlist — turn on repeat to keep going", {
@@ -1160,8 +1161,8 @@ function App() {
   };
 
   const handleRescan = async () => {
-    if (!library.musicFolder) {
-      toast("Link a music folder first", { icon: "📁" });
+    if (!library.musicFolder && !library.downloadFolder) {
+      toast("Link a music folder or pick a download folder first", { icon: "📁" });
       return;
     }
     try {
@@ -1205,16 +1206,65 @@ function App() {
       const fresh = await setDownloadFolder(selected);
       setLibrary(fresh);
       toast.success("Download folder set");
+      try {
+        setIsScanning(true);
+        const scanned = await scanMusicFolder();
+        setLibrary(scanned.library);
+        if (scanned.added > 0) {
+          toast.success(`Found ${scanned.added} track${scanned.added === 1 ? "" : "s"} in folder`);
+        }
+        void runDurationHydration(scanned.library.songs);
+      } catch (e) {
+        console.warn(e);
+      } finally {
+        setIsScanning(false);
+      }
     } catch (err) {
       console.error(err);
       toast.error("Failed to set download folder");
     }
   };
 
+  const handleCheckUpdates = async () => {
+    if (checkingUpdates) return;
+    setCheckingUpdates(true);
+    try {
+      const { check } = await import("@tauri-apps/plugin-updater");
+      const { relaunch } = await import("@tauri-apps/plugin-process");
+      const update = await check();
+      if (!update) {
+        toast.success("You're on the latest version");
+        return;
+      }
+      toast(`v${update.version} found — downloading…`, { icon: "↓" });
+      await update.downloadAndInstall((ev) => {
+        if (ev.event === "Progress") {
+          /* keep quiet — toast already shown */
+        }
+      });
+      toast.success("Updated. Restarting…");
+      await relaunch();
+    } catch (err) {
+      const msg = String(err);
+      console.error("Update check failed:", err);
+      if (/REPLACE_WITH_TAURI_SIGNER_PUBKEY|invalid.*key|pubkey|signature/i.test(msg)) {
+        toast.error("Updater key not set — generate a signer key first");
+      } else if (/404|not found|latest\.json/i.test(msg)) {
+        toast("No updater package on GitHub yet (need latest.json on the release)", { icon: "ℹ️" });
+      } else if (/Could not fetch|error sending request|dns|timed out|offline/i.test(msg)) {
+        toast.error("Couldn't reach GitHub releases");
+      } else {
+        toast.error(msg.slice(0, 160) || "Update check failed");
+      }
+    } finally {
+      setCheckingUpdates(false);
+    }
+  };
+
   const handleYtDownloaded = async (filePath: string, title: string) => {
     let finalPath = filePath;
     let fileName = filePath.split(/[/\\]/).pop() || title;
-    
+
     // Auto-enrich new downloads to get clean names, cover art, and metadata
     try {
       const tempSong = {
@@ -1226,9 +1276,9 @@ function App() {
         fileName,
         duration: 0
       } as Song;
-      
+
       const result = await enrichSong(tempSong);
-      if (result.status === "updated") {
+      if (result.status === "updated" || result.status === "cleaned") {
         const newPath = await applyEnrichment(tempSong, result);
         if (newPath) {
           finalPath = newPath;
@@ -1285,11 +1335,11 @@ function App() {
             prev.map((j) =>
               j.id === next.id
                 ? {
-                    ...j,
-                    status: "downloading",
-                    percent: 2,
-                    message: "Searching…",
-                  }
+                  ...j,
+                  status: "downloading",
+                  percent: 2,
+                  message: "Searching…",
+                }
                 : j
             )
           );
@@ -1352,11 +1402,11 @@ function App() {
             prev.map((j) =>
               j.id === next.id
                 ? {
-                    ...j,
-                    status: wasCancelled ? "cancelled" : "error",
-                    message: wasCancelled ? "Cancelled" : msg,
-                    percent: 0,
-                  }
+                  ...j,
+                  status: wasCancelled ? "cancelled" : "error",
+                  message: wasCancelled ? "Cancelled" : msg,
+                  percent: 0,
+                }
                 : j
             )
           );
@@ -1439,20 +1489,20 @@ function App() {
         prev.map((j) =>
           j.id === p.job_id
             ? {
-                ...j,
-                percent: p.percent,
-                status:
-                  p.status === "done"
-                    ? "done"
-                    : p.status === "cancelled"
+              ...j,
+              percent: p.percent,
+              status:
+                p.status === "done"
+                  ? "done"
+                  : p.status === "cancelled"
                     ? "cancelled"
                     : p.status === "error"
-                    ? "error"
-                    : p.status === "converting"
-                    ? "converting"
-                    : "downloading",
-                message: p.message,
-              }
+                      ? "error"
+                      : p.status === "converting"
+                        ? "converting"
+                        : "downloading",
+              message: p.message,
+            }
             : j
         )
       );
@@ -1659,6 +1709,8 @@ function App() {
           onImportPlaylist={handleImportPlaylist}
           downloadFolder={library.downloadFolder}
           onPickDownloadFolder={handlePickDownloadFolder}
+          onCheckUpdates={handleCheckUpdates}
+          checkingUpdates={checkingUpdates}
         />
 
         <main className="flex-1 overflow-y-auto bg-gradient-to-b from-[#1a1a1a] to-spotify-black">
@@ -1787,8 +1839,8 @@ function App() {
           setDownloadJobs((prev) =>
             prev.map((j) =>
               j.status === "queued" ||
-              j.status === "downloading" ||
-              j.status === "converting"
+                j.status === "downloading" ||
+                j.status === "converting"
                 ? { ...j, status: "cancelled" as const, message: "Cancelled" }
                 : j
             )
@@ -1874,10 +1926,10 @@ function App() {
                   songs: prev.songs.map((s) => {
                     const u = updates.get(s.id);
                     if (u) {
-                      return { 
-                        ...s, 
-                        title: u.title, 
-                        artist: u.artist, 
+                      return {
+                        ...s,
+                        title: u.title,
+                        artist: u.artist,
                         album: u.album,
                         path: u.newPath || s.path,
                         fileName: u.newFileName || s.fileName,

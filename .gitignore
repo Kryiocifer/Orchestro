@@ -161,3 +161,30 @@ Downloaded Songs/
 Test Imports/
 src-tauri/target/
 temp/
+
+# Dependencies
+node_modules/
+dist/
+
+# Tauri
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Updater signing key — NEVER commit this
+*.key
+src-tauri/orchestro.key
+src-tauri/orchestro.key.pub

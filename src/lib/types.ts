@@ -51,6 +51,7 @@ export interface YtSearchResult {
   uploader: string;
   duration: number | null;
   url: string;
+  playlist_title?: string | null;
 }
 
 

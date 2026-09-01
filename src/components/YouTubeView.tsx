@@ -40,6 +40,8 @@ export default function YouTubeView({
 }: YouTubeViewProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<YtSearchResult[]>([]);
+  const [playlistMode, setPlaylistMode] = useState(false);
+  const [playlistTitle, setPlaylistTitle] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ytdlpStatus, setYtdlpStatus] = useState<{
@@ -211,11 +213,18 @@ export default function YouTubeView({
     setSearching(true);
     setError(null);
     setResults([]);
+    const looksLikeUrl = /youtube\.com|youtu\.be|music\.youtube\.com/i.test(q);
+    setPlaylistMode(looksLikeUrl);
+    setPlaylistTitle(null);
 
     try {
       const res = await invoke<YtSearchResult[]>("yt_search", { query: q });
       setResults(res || []);
       if (!res?.length) setError("No results found");
+      const isPl = looksLikeUrl && (res?.length || 0) > 1;
+      setPlaylistMode(isPl);
+      const pt = res?.find((r) => r.playlist_title)?.playlist_title || null;
+      setPlaylistTitle(isPl ? (pt || "YouTube Playlist") : null);
     } catch (err) {
       const msg = String(err);
       if (!navigator.onLine || /network|offline|failed to fetch|resolve/i.test(msg)) {
@@ -227,6 +236,21 @@ export default function YouTubeView({
     } finally {
       setSearching(false);
     }
+  };
+
+  const playlistFolder = (): string | undefined => {
+    if (!playlistMode || !downloadFolder) return undefined;
+    const raw = (playlistTitle || "YouTube Playlist").trim();
+    const safe =
+      raw
+        .replace(/[<>:"/\\|?*]/g, "_")
+        .replace(/[.\s]+$/g, "")
+        .trim()
+        .slice(0, 80) || "YouTube Playlist";
+    const sep = downloadFolder.includes("\\") ? "\\" : "/";
+    return downloadFolder.endsWith("\\") || downloadFolder.endsWith("/")
+      ? `${downloadFolder}${safe}`
+      : `${downloadFolder}${sep}${safe}`;
   };
 
   const handleDownload = (item: YtSearchResult) => {
@@ -259,9 +283,37 @@ export default function YouTubeView({
         percent: 0,
         status: "queued",
         message: item.url,
+        folder: playlistFolder(),
+        playlistName: playlistTitle || undefined,
       },
       ...prev,
     ]);
+  };
+
+  const handleDownloadAll = () => {
+    if (!downloadFolder) {
+      setError("Pick a download folder first");
+      return;
+    }
+    const pending = results.filter((item) => !isJobDone(item.id) && !isJobActive(item.id));
+    if (pending.length === 0) return;
+    setJobs((prev) => {
+      const dest = playlistFolder();
+      const extra: DownloadJob[] = pending.map((item) => ({
+        id: `${item.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        title: item.title,
+        percent: 0,
+        status: "queued",
+        message: item.url,
+        folder: dest,
+        playlistName: playlistTitle || undefined,
+      }));
+      return [...extra, ...prev];
+    });
+    const name = playlistTitle || "playlist";
+    toast.success(
+      `Queued ${pending.length} track${pending.length === 1 ? "" : "s"} → ${name}`
+    );
   };
 
   const folderLabel = downloadFolder
@@ -358,7 +410,7 @@ export default function YouTubeView({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search songs, artists, soundtracks…"
+            placeholder="Search, or paste a YouTube playlist / video link…"
             className="w-full rounded-full bg-white/10 py-3 pl-10 pr-4 text-sm text-white outline-none placeholder:text-spotify-lightgray focus:bg-white/15"
           />
         </div>
@@ -392,7 +444,7 @@ export default function YouTubeView({
           {searching && (
             <div className="flex flex-col items-center justify-center py-20 text-spotify-lightgray">
               <Loader2 className="mb-3 h-8 w-8 animate-spin text-spotify-green" />
-              Searching…
+              {playlistMode ? "Loading playlist…" : "Searching…"}
             </div>
           )}
 
@@ -403,6 +455,23 @@ export default function YouTubeView({
               <p className="mt-1 text-xs">
                 Needs yt-dlp installed + a download folder
               </p>
+            </div>
+          )}
+
+          {playlistMode && results.length > 0 && !searching && (
+            <div className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2">
+              <p className="min-w-0 truncate text-sm text-white/80">
+                {playlistTitle || "Playlist"} · {results.length} track
+                {results.length === 1 ? "" : "s"}
+              </p>
+              <button
+                onClick={handleDownloadAll}
+                disabled={!downloadFolder}
+                className="flex items-center gap-2 rounded-full bg-spotify-green px-4 py-1.5 text-sm font-semibold text-black hover:bg-spotify-green-hover disabled:opacity-40"
+              >
+                <Download className="h-4 w-4" />
+                Download all
+              </button>
             </div>
           )}
 

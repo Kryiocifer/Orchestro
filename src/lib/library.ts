@@ -183,12 +183,17 @@ async function extractMetadata(
   }
 }
 
-/** Iterative walk — avoids stack overflow on deep folders */
+/** Walk a folder via Rust std::fs so Z: / mapped drives work after restart */
 async function collectAudioFiles(root: string): Promise<string[]> {
+  try {
+    const paths = await invoke<string[]>("list_audio_files", { root });
+    return paths || [];
+  } catch (err) {
+    console.warn("Rust list_audio_files failed, JS fallback:", root, err);
+  }
   const out: string[] = [];
   const stack: string[] = [root];
-  const maxFiles = 5000; // safety cap
-
+  const maxFiles = 5000;
   while (stack.length > 0 && out.length < maxFiles) {
     const dir = stack.pop()!;
     try {
@@ -335,19 +340,30 @@ export async function scanMusicFolder(): Promise<{
   removed: number;
 }> {
   const library = await loadLibrary();
-  if (!library.musicFolder) {
+  const roots = [library.musicFolder, library.downloadFolder].filter(
+    (p): p is string => !!p && p.trim().length > 0
+  );
+  if (roots.length === 0) {
     return { library, added: 0, skipped: 0, updated: 0, removed: 0 };
   }
 
   const perf = getPerfProfile();
   console.log("Scan perf tier:", perf.tier);
 
-  const folder = library.musicFolder;
-  const folderKey = folder.replace(/\\/g, "/").toLowerCase();
+  const folderKeys = roots.map((f) => f.replace(/\\/g, "/").toLowerCase());
 
   let paths: string[] = [];
   try {
-    paths = await collectAudioFiles(folder);
+    const seenPath = new Set<string>();
+    for (const root of roots) {
+      const found = await collectAudioFiles(root);
+      for (const p of found) {
+        const k = p.replace(/\\/g, "/").toLowerCase();
+        if (seenPath.has(k)) continue;
+        seenPath.add(k);
+        paths.push(p);
+      }
+    }
   } catch (err) {
     console.error("Folder walk failed:", err);
     return { library, added: 0, skipped: 0, updated: 0, removed: 0 };
@@ -445,7 +461,7 @@ export async function scanMusicFolder(): Promise<{
             ...library.songs.filter((s) => {
               if (seenIds.has(s.id)) return false;
               const p = s.path.replace(/\\/g, "/").toLowerCase();
-              return !p.startsWith(folderKey);
+              return !folderKeys.some((k) => p.startsWith(k));
             }),
           ],
         };
@@ -470,13 +486,13 @@ export async function scanMusicFolder(): Promise<{
   const keptOutside = library.songs.filter((s) => {
     if (seenIds.has(s.id)) return false;
     const p = s.path.replace(/\\/g, "/").toLowerCase();
-    return !p.startsWith(folderKey);
+    return !folderKeys.some((k) => p.startsWith(k));
   });
 
   const removedSongs = library.songs.filter((s) => {
     if (seenIds.has(s.id)) return false;
     const p = s.path.replace(/\\/g, "/").toLowerCase();
-    return p.startsWith(folderKey);
+    return folderKeys.some((k) => p.startsWith(k));
   });
   const removed = removedSongs.length;
   const removedIds = new Set(removedSongs.map((s) => s.id));
@@ -594,13 +610,26 @@ export async function pruneMissingSongs(): Promise<{
 
   for (const song of library.songs) {
     try {
-      if (song.path && (await exists(song.path))) {
-        kept.push(song);
-      } else {
+      if (!song.path) {
         removed++;
+        continue;
       }
+      let ok = false;
+      try {
+        ok = await invoke<boolean>("path_exists", { path: song.path });
+      } catch {
+        try {
+          ok = await exists(song.path);
+        } catch {
+          // Don't delete the row if we simply couldn't check (Z: scope, lock, etc.)
+          kept.push(song);
+          continue;
+        }
+      }
+      if (ok) kept.push(song);
+      else removed++;
     } catch {
-      removed++;
+      kept.push(song);
     }
   }
 

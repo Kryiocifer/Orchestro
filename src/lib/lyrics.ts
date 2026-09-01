@@ -74,7 +74,7 @@ export function cleanTrackTitle(title: string): string {
     .replace(/\s*\(remastered.*?\)/gi, "")
     .replace(/\s*-\s*remastered.*?$/gi, "")
     .replace(/\.(mp3|flac|wav|m4a|aac|ogg|opus)$/i, "")
-    .replace(/\s*\[[a-zA-Z0-9_-]{11}\]/g, ""); // Strip trailing YouTube ID
+    .replace(/\s*[\[(][a-zA-Z0-9_-]{6,16}[\])]\s*/g, " "); // Strip yt-dlp / YouTube ids of any length 6–16
 
   // Strip common YouTube fluff
   cleaned = cleaned.replace(/\s*official\s*full\s*video\s*song\s*/gi, " ");

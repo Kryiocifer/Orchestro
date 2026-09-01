@@ -13,18 +13,52 @@ export interface EnrichmentResult {
   album: string;
   artworkUrl: string;
   newPath?: string;
-  status: "updated" | "skipped" | "no_match" | "error";
+  status: "updated" | "cleaned" | "skipped" | "no_match" | "error";
   reason?: string;
+}
+
+/** Trailing yt-dlp / YouTube junk: [dQw4w9WgXcQ], [oidfgfoehfog], (abc_12-xy) */
+const ID_CHUNK = String.raw`[a-zA-Z0-9_-]{6,16}`;
+const TRAILING_ID_RE = new RegExp(String.raw`\s*[\[(]${ID_CHUNK}[\])]\s*$`, "g");
+const ANY_ID_RE = new RegExp(String.raw`[\[(]${ID_CHUNK}[\])]`, "g");
+
+/** Strip random bracket IDs from titles / filenames. Safe for RAM (string-only). */
+export function stripJunkIds(raw: string): string {
+  let s = (raw || "").trim();
+  s = s.replace(/\.(mp3|flac|wav|m4a|aac|ogg|opus)$/i, "");
+  for (let i = 0; i < 5; i++) {
+    const next = s.replace(TRAILING_ID_RE, "").trim();
+    if (next === s) break;
+    s = next;
+  }
+  // mid-string ids with no spaces (never strip "[Official Video]")
+  s = s.replace(new RegExp(String.raw`\s*[\[(]${ID_CHUNK}[\])]\s*`, "g"), " ");
+  return s.replace(/\s+/g, " ").trim();
+}
+
+function sourceText(song: Song): string {
+  const fromFile = stripJunkIds(song.fileName || "");
+  const fromTitle = stripJunkIds(song.title || "");
+  // Prefer the longer cleaned string — filename often still has Artist - Title
+  if (fromFile.length >= fromTitle.length && fromFile) return fromFile;
+  return fromTitle || fromFile;
+}
+
+function hasJunkId(song: Song): boolean {
+  ANY_ID_RE.lastIndex = 0;
+  if (ANY_ID_RE.test(song.title || "")) return true;
+  ANY_ID_RE.lastIndex = 0;
+  return ANY_ID_RE.test(song.fileName || "");
 }
 
 /**
  * Returns true if the song likely needs enrichment.
  */
 function needsEnrichment(song: Song): boolean {
-  const t = song.title;
+  const t = `${song.title || ""} ${song.fileName || ""}`;
+  if (hasJunkId(song)) return true;
   if (/\||｜/.test(t)) return true;
   if (/official.*(video|audio)|video song|lyrical|full video/i.test(t)) return true;
-  if (/\[[a-zA-Z0-9_-]{11}\]/.test(t)) return true;
   if (!song.artist || /^unknown\s*artist$/i.test(song.artist.trim())) return true;
   return false;
 }
@@ -33,9 +67,7 @@ function needsEnrichment(song: Song): boolean {
  * Extracts the song name and artist name from a yt-dlp-style filename.
  */
 function extractMetadata(rawTitle: string): { songName: string; artistName: string } {
-  let title = rawTitle
-    .replace(/\s*\[[a-zA-Z0-9_-]{11}\]/g, "")
-    .replace(/\.(mp3|flac|wav|m4a|aac|ogg|opus)$/i, "")
+  let title = stripJunkIds(rawTitle)
     .replace(/^@[\w\s.]+\s*-\s*/i, "")
     .trim();
 
@@ -78,21 +110,29 @@ function extractMetadata(rawTitle: string): { songName: string; artistName: stri
       }
     }
   } else if (title.includes(" - ")) {
-    // Western Format: "Artist - Song" or "Song - Artist"
+    // Western: "Artist - Song" OR "Song - Artist" (OST dumps use the latter)
     const dashIdx = title.indexOf(" - ");
     const left = title.substring(0, dashIdx).trim();
     let right = title.substring(dashIdx + 3).trim();
+    right = right
+      .replace(/\s*-[^-]*(official|lyric|audio|video|live|visualizer)[^-]*-?\s*/gi, "")
+      .trim();
+    right = stripYtFluff(right);
+    right = right.replace(/\s*(official|lyric|video|audio|visualizer)\s*$/gi, "");
 
-    // Specific check for "Song - Artist" if right side is clearly the artist
-    if (/Cigarettes After Sex/i.test(right)) {
-      songPart = stripYtFluff(left);
-      artistPart = "Cigarettes After Sex";
+    const leftWords = left.split(/\s+/).filter(Boolean).length;
+    const numbered = /^\d{1,3}\.\s+/.test(left);
+    const leftLooksLikeTitle =
+      numbered ||
+      /\(.*soundtrack.*\)/i.test(left) ||
+      leftWords >= 4 ||
+      left.length > right.length + 8;
+
+    if (leftLooksLikeTitle) {
+      songPart = stripYtFluff(left.replace(/^\d{1,3}\.\s+/, ""));
+      artistPart = right;
     } else {
-      // Default to right side being the song
       artistPart = left;
-      right = right.replace(/\s*-[^-]*(official|lyric|audio|video|live|visualizer)[^-]*-?\s*/gi, "").trim();
-      right = stripYtFluff(right);
-      right = right.replace(/\s*(official|lyric|video|audio|visualizer)\s*$/gi, "");
       songPart = right || stripYtFluff(title);
     }
   } else {
@@ -169,7 +209,8 @@ export async function enrichSong(song: Song): Promise<EnrichmentResult> {
   }
 
   try {
-    const { songName, artistName } = extractMetadata(song.title);
+    const cleanedSource = sourceText(song);
+    const { songName, artistName } = extractMetadata(cleanedSource);
     if (!songName) {
       return {
         songId: song.id,
@@ -182,7 +223,7 @@ export async function enrichSong(song: Song): Promise<EnrichmentResult> {
       };
     }
 
-    const query = artistName ? `${songName} ${artistName}` : songName;
+    const query = artistName ? `${artistName} ${songName}` : songName;
     const res = await fetch(
       `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=5`
     );
@@ -190,28 +231,49 @@ export async function enrichSong(song: Song): Promise<EnrichmentResult> {
 
     const json = await res.json();
     const results: any[] = json.results ?? [];
+    // Drop the rest of the payload immediately — keep 5 small objects max
+    json.results = undefined;
+
+    const cleanedFallback = (): EnrichmentResult => ({
+      songId: song.id,
+      // Keep the original name minus [id] only — do not rebuild from parsed parts
+      title: cleanedSource || songName,
+      artist: artistName || (song.artist !== "Unknown Artist" ? song.artist : "Unknown Artist"),
+      album: song.album,
+      artworkUrl: "",
+      status: "cleaned",
+      reason: "Stripped junk id; iTunes had no confident match",
+    });
 
     if (results.length === 0) {
-      return {
-        songId: song.id,
-        title: song.title,
-        artist: song.artist,
-        album: song.album,
-        artworkUrl: "",
-        status: "no_match",
-        reason: "Not found on iTunes",
-      };
+      return hasJunkId(song) || cleanedSource !== (song.title || "")
+        ? cleanedFallback()
+        : {
+            songId: song.id,
+            title: song.title,
+            artist: song.artist,
+            album: song.album,
+            artworkUrl: "",
+            status: "no_match",
+            reason: "Not found on iTunes",
+          };
     }
 
     // Score by title similarity
     const scored = results
-      .map((r) => ({ ...r, score: similarity(songName, r.trackName ?? "") }))
+      .map((r) => ({
+        trackName: r.trackName as string | undefined,
+        artistName: r.artistName as string | undefined,
+        collectionName: r.collectionName as string | undefined,
+        artworkUrl100: r.artworkUrl100 as string | undefined,
+        score: similarity(songName, r.trackName ?? ""),
+      }))
       .sort((a, b) => b.score - a.score);
     const best = scored[0];
 
     // Lower threshold now that queries are clean: 30% token overlap
     if (best.score < 0.3) {
-      return {
+      return hasJunkId(song) ? cleanedFallback() : {
         songId: song.id,
         title: song.title,
         artist: song.artist,
@@ -227,7 +289,7 @@ export async function enrichSong(song: Song): Promise<EnrichmentResult> {
     return {
       songId: song.id,
       title: best.trackName ?? songName,
-      artist: best.artistName ?? song.artist,
+      artist: best.artistName ?? artistName ?? song.artist,
       album: best.collectionName ?? song.album,
       artworkUrl,
       status: "updated",
@@ -250,12 +312,18 @@ export async function enrichSong(song: Song): Promise<EnrichmentResult> {
  * and optionally rename the file to a clean format.
  */
 export async function applyEnrichment(song: Song, result: EnrichmentResult): Promise<string | undefined> {
-  if (result.status !== "updated") return undefined;
+  if (result.status !== "updated" && result.status !== "cleaned") return undefined;
 
   // Generate safe filename (remove invalid chars for Windows/Mac/Linux)
-  const safeArtist = result.artist.replace(/[<>:"/\\|?*]/g, "").trim();
+  const safeArtist = (result.artist || "Unknown Artist").replace(/[<>:"/\\|?*]/g, "").trim();
   const safeTitle = result.title.replace(/[<>:"/\\|?*]/g, "").trim();
-  const newFileName = `${safeArtist} - ${safeTitle}`;
+  // cleaned = original filename minus [id] only (title already holds that full string)
+  const newFileName =
+    result.status === "cleaned"
+      ? safeTitle
+      : safeArtist && safeArtist !== "Unknown Artist"
+      ? `${safeArtist} - ${safeTitle}`
+      : safeTitle;
 
   const newPath = await invoke<string>("write_song_tags", {
     path: song.path,
