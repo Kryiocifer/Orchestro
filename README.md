@@ -16,6 +16,7 @@ Orchestro is a modern, lightweight, offline-first desktop music player and downl
 - **Metadata Extraction**: Automatically parses titles, artists, albums, durations, and embedded cover art for various audio formats including `.mp3`, `.flac`, `.wav`, `.ogg`, and `.m4a`.
 - **Playlist Management**: Enables the creation of custom playlists, contextual actions via right-click, search filtering, and drag-and-drop support.
 - **Native Media Controls**: Integrates with the Media Session API for native operating system media keys and playback shortcuts.
+- **Cross-Platform Auto-Updates**: Fully automated GitHub Actions release pipeline that securely builds, signs, and distributes cross-platform updates (Windows, Linux, macOS) seamlessly via the built-in Tauri updater.
 
 ---
 
@@ -110,6 +111,19 @@ Artifacts will be output to the following locations:
 - **AppImage:** `src-tauri/target/release/bundle/appimage/Orchestro_*.AppImage`
 - **Debian Package:** `src-tauri/target/release/bundle/deb/Orchestro_*.deb`
 - **RPM Package:** `src-tauri/target/release/bundle/rpm/Orchestro-*.rpm`
+
+---
+
+## CI/CD and Automated Releases
+
+Orchestro is equipped with a comprehensive GitHub Actions workflow (`.github/workflows/release.yml`) that automates cross-platform builds and the in-app updater pipeline.
+
+When you push a version tag (e.g., `v2.3.1`) or manually trigger the workflow:
+1. It simultaneously compiles for **Windows**, **Linux**, and **macOS**.
+2. It generates all necessary deployment bundles (NSIS `.zip`, `.AppImage.tar.gz`, `.deb`, `.rpm`, etc.).
+3. It securely signs every artifact using the provided `TAURI_SIGNING_PRIVATE_KEY` repository secret.
+4. It flawlessly merges the `latest.json` configurations from all operating systems into a single release manifest.
+5. It publishes a Draft Release to GitHub containing all assets, immediately readying the in-app updater to seamlessly deploy the new version to users across all platforms.
 
 ---
 
