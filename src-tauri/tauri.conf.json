@@ -57,7 +57,7 @@
     ],
     "linux": {
       "appimage": {
-        "bundleMediaFramework": true
+        "bundleMediaFramework": false
       }
     },
     "createUpdaterArtifacts": true
