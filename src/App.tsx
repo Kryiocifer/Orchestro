@@ -38,6 +38,8 @@ import { Song, LibraryData, View, SavedPlaybackState } from "./lib/types";
 import { isAudioFile } from "./lib/utils";
 import { fetchRemoteCoverArt } from "./lib/metadata";
 const EnrichmentModal = lazy(() => import("./components/EnrichmentModal"));
+const SettingsModal = lazy(() => import("./components/SettingsModal"));
+const ChangelogModal = lazy(() => import("./components/ChangelogModal"));
 import type { DownloadJob } from "./components/DownloadPanel";
 
 const coverCache = new Map<string, string | null>();
@@ -63,6 +65,9 @@ function App() {
   const [equalizerOpen, setEqualizerOpen] = useState(false);
   const [enrichmentOpen, setEnrichmentOpen] = useState(false);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showChangelog, setShowChangelog] = useState<{ title: string; body: string } | null>(null);
+
   useEffect(() => {
     if (downloadJobs.some((j) => j.status === "downloading" || j.status === "queued" || j.status === "converting")) {
       setDownloadPanelOpen(true);
@@ -155,10 +160,68 @@ function App() {
     saveSessionStateRef.current = saveSessionState;
   }, [saveSessionState]);
 
+  // Update Check & Changelog on Startup
+  useEffect(() => {
+    (async () => {
+      try {
+        const { getVersion } = await import("@tauri-apps/api/app");
+        const currentVersion = await getVersion();
+        const lastVersion = localStorage.getItem("orchestro_last_version");
+
+        if (lastVersion && lastVersion !== currentVersion) {
+          // App was just updated! Fetch release notes
+          try {
+            const res = await fetch(`https://api.github.com/repos/Kryiocifer/Orchestro/releases/tags/v${currentVersion}`);
+            if (res.ok) {
+              const data = await res.json();
+              setShowChangelog({
+                title: data.name || data.tag_name || `Version ${currentVersion}`,
+                body: data.body || "Enjoy the latest update!"
+              });
+            }
+          } catch (e) {
+            console.warn("Failed to fetch changelog:", e);
+          }
+        }
+
+        // Save current version
+        if (lastVersion !== currentVersion) {
+          localStorage.setItem("orchestro_last_version", currentVersion);
+        }
+
+        // Silent check for new updates
+        const { check } = await import("@tauri-apps/plugin-updater");
+        const update = await check();
+        if (update) {
+          toast.custom((t) => (
+            <div
+              className="bg-[#282828] text-white px-5 py-4 shadow-2xl rounded-2xl flex items-center gap-4 cursor-pointer border border-[#333] hover:bg-[#333] transition"
+              onClick={() => {
+                toast.dismiss(t.id);
+                setSettingsOpen(true);
+              }}
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-spotify-green/20 text-spotify-green ring-1 ring-spotify-green/30">
+                <span className="text-xl"></span>
+              </div>
+              <div>
+                <p className="font-semibold text-sm">Update available (v{update.version})</p>
+                <p className="text-[13px] text-spotify-lightgray mt-0.5">Click to open settings and install</p>
+              </div>
+            </div>
+          ), { duration: 15000, position: "bottom-right" });
+        }
+      } catch (err) {
+        console.warn("Startup update check failed:", err);
+      }
+    })();
+  }, []);
+
   /** Prevents media-key repeat / double-fire from skipping multiple songs */
   const skipLockRef = useRef(0); // timestamp of last next/prev
   const hydrateCancelRef = useRef(false);
   const hydrateRunningRef = useRef(false);
+  const hasCheckedFirstRunRef = useRef(false);
 
   const runDurationHydration = useCallback(async (songs: Song[]) => {
     const needs = songs.filter((s) => !s.duration || s.duration <= 0);
@@ -266,6 +329,14 @@ function App() {
         songs.push(s);
       }
       setLibrary({ ...pruned, songs });
+
+      if (!hasCheckedFirstRunRef.current) {
+        hasCheckedFirstRunRef.current = true;
+        if (!pruned.musicFolder && !pruned.downloadFolder) {
+          setSettingsOpen(true);
+        }
+      }
+
       if (removed > 0) {
         toast(`${removed} missing file${removed > 1 ? "s" : ""} removed from library`, {
           icon: "🧹",
@@ -1717,21 +1788,14 @@ function App() {
           setCurrentView={setCurrentView}
           playlists={library.playlists}
           activePlaylistId={activePlaylistId}
-          musicFolder={library.musicFolder}
-          isScanning={isScanning}
           onSelectPlaylist={(id) => {
             setActivePlaylistId(id);
             setCurrentView("playlist");
           }}
           onCreatePlaylist={handleCreatePlaylist}
           onDeletePlaylist={handleDeletePlaylist}
-          onLinkFolder={handleLinkFolder}
-          onRescan={handleRescan}
           onImportPlaylist={handleImportPlaylist}
-          downloadFolder={library.downloadFolder}
-          onPickDownloadFolder={handlePickDownloadFolder}
-          onCheckUpdates={handleCheckUpdates}
-          checkingUpdates={checkingUpdates}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
 
         <main className="flex-1 overflow-y-auto bg-gradient-to-b from-[#1a1a1a] to-spotify-black">
@@ -1973,6 +2037,34 @@ function App() {
                 });
               }
             }}
+          />
+        </Suspense>
+      )}
+
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsModal
+            isOpen={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            musicFolder={library.musicFolder}
+            downloadFolder={library.downloadFolder}
+            onLinkFolder={handleLinkFolder}
+            onPickDownloadFolder={handlePickDownloadFolder}
+            onCheckUpdates={handleCheckUpdates}
+            checkingUpdates={checkingUpdates}
+            onRescan={handleRescan}
+            isScanning={isScanning}
+          />
+        </Suspense>
+      )}
+
+      {showChangelog && (
+        <Suspense fallback={null}>
+          <ChangelogModal
+            isOpen={!!showChangelog}
+            onClose={() => setShowChangelog(null)}
+            title={showChangelog.title}
+            body={showChangelog.body}
           />
         </Suspense>
       )}

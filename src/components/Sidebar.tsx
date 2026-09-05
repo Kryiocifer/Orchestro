@@ -21,18 +21,11 @@ interface SidebarProps {
   setCurrentView: (view: View) => void;
   playlists: Playlist[];
   activePlaylistId: string | null;
-  musicFolder: string | null | undefined;
-  isScanning?: boolean;
   onSelectPlaylist: (id: string) => void;
   onCreatePlaylist: (name: string) => void;
   onDeletePlaylist: (id: string) => void;
-  onLinkFolder: () => void;
-  onRescan: () => void;
   onImportPlaylist: () => void;
-  downloadFolder?: string | null;
-  onPickDownloadFolder: () => void;
-  onCheckUpdates?: () => void;
-  checkingUpdates?: boolean;
+  onOpenSettings: () => void;
 }
 
 export default function Sidebar({
@@ -40,18 +33,11 @@ export default function Sidebar({
   setCurrentView,
   playlists,
   activePlaylistId,
-  musicFolder,
-  isScanning,
   onSelectPlaylist,
   onCreatePlaylist,
   onDeletePlaylist,
-  onLinkFolder,
-  onRescan,
   onImportPlaylist,
-  downloadFolder,
-  onPickDownloadFolder,
-  onCheckUpdates,
-  checkingUpdates,
+  onOpenSettings,
 }: SidebarProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -63,14 +49,6 @@ export default function Sidebar({
       setIsCreating(false);
     }
   };
-
-  const folderLabel = musicFolder
-    ? musicFolder.split(/[/\\]/).filter(Boolean).pop() || musicFolder
-    : null;
-
-  const dlLabel = downloadFolder
-    ? downloadFolder.split(/[/\\]/).filter(Boolean).pop()
-    : null;
 
   return (
     <aside className="flex h-full w-[260px] min-h-0 shrink-0 flex-col bg-spotify-darker px-3 py-5 select-none overflow-hidden">
@@ -106,71 +84,8 @@ export default function Sidebar({
         ))}
       </nav>
 
-      {/* Scrollable lower menu (Music Folder, Downloads, Playlists) */}
+      {/* Scrollable lower menu (Playlists) */}
       <div className="sidebar-scroll mt-5 flex min-h-0 flex-1 flex-col space-y-5 pr-1">
-        {/* Music folder */}
-        <div className="space-y-0.5 px-1">
-          <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-widest text-spotify-lightgray/80">
-            Music Folder
-          </p>
-          <button
-            onClick={onLinkFolder}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-spotify-lightgray transition hover:bg-white/5 hover:text-white"
-            title={musicFolder || "Link a folder"}
-          >
-            <FolderOpen className="h-4 w-4 shrink-0 opacity-80" />
-            <span className="truncate">{folderLabel || "Link folder…"}</span>
-          </button>
-          {musicFolder && (
-            <button
-              onClick={onRescan}
-              disabled={isScanning}
-              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-spotify-lightgray transition hover:bg-white/5 hover:text-white disabled:opacity-50"
-            >
-              <RefreshCw
-                className={cn("h-4 w-4 shrink-0 opacity-80", isScanning && "animate-spin")}
-              />
-              {isScanning ? "Scanning…" : "Rescan folder"}
-            </button>
-          )}
-          <button
-            onClick={onImportPlaylist}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-spotify-lightgray transition hover:bg-white/5 hover:text-white"
-          >
-            <FileAudio className="h-4 w-4 shrink-0 opacity-80" />
-            Import playlist…
-          </button>
-        </div>
-
-        {/* Downloads */}
-        <div className="space-y-0.5 px-1">
-          <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-widest text-spotify-lightgray/80">
-            Downloads
-          </p>
-          <button
-            onClick={onPickDownloadFolder}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-spotify-lightgray transition hover:bg-white/5 hover:text-white"
-            title={downloadFolder || "Download folder"}
-          >
-            <FolderOpen className="h-4 w-4 shrink-0 opacity-80" />
-            <span className="truncate">
-              {dlLabel || "Set download folder…"}
-            </span>
-          </button>
-          {onCheckUpdates && (
-            <button
-              onClick={onCheckUpdates}
-              disabled={checkingUpdates}
-              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-spotify-lightgray transition hover:bg-white/5 hover:text-white disabled:opacity-50"
-            >
-              <Download
-                className={cn("h-4 w-4 shrink-0 opacity-80", checkingUpdates && "animate-pulse")}
-              />
-              {checkingUpdates ? "Checking…" : "Check for updates"}
-            </button>
-          )}
-        </div>
-
         {/* Playlists */}
         <div className="flex-1 space-y-1">
           <div className="flex items-center justify-between px-4">
@@ -247,6 +162,24 @@ export default function Sidebar({
             )}
           </div>
         </div>
+      </div>
+      {/* Bottom actions */}
+      <div className="mt-auto pt-4 space-y-1">
+        <button
+          onClick={onImportPlaylist}
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-spotify-lightgray transition hover:bg-white/5 hover:text-white"
+        >
+          <FileAudio className="h-4 w-4 shrink-0 opacity-80" />
+          Import playlist…
+        </button>
+        
+        <button
+          onClick={onOpenSettings}
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-spotify-lightgray transition hover:bg-white/5 hover:text-white"
+        >
+          <RefreshCw className="h-4 w-4 shrink-0 opacity-80" />
+          Settings
+        </button>
       </div>
     </aside>
   );

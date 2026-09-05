@@ -2179,6 +2179,7 @@ pub fn run() {
             resolve_spotify_link,
             parse_track_list_text,
             download_ffmpeg,
+            ffmpeg_status,
             get_song_cover,
             write_song_tags,
             path_exists,
@@ -2277,6 +2278,15 @@ async fn download_ffmpeg(app: AppHandle) -> Result<String, String> {
     }
     
     Err("Could not find ffmpeg.exe in the downloaded archive".into())
+}
+
+#[tauri::command]
+fn ffmpeg_status(app: AppHandle) -> bool {
+    if let Ok(app_data) = app.path().app_data_dir() {
+        let ffmpeg_path = app_data.join("bin").join("ffmpeg.exe");
+        return ffmpeg_path.exists();
+    }
+    false
 }
 
 #[tauri::command]
