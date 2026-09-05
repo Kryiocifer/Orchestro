@@ -6,7 +6,6 @@ import {
   X,
   FolderOpen,
   Download,
-  AlertCircle,
   RefreshCw,
   Settings,
   Terminal,
