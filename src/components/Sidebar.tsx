@@ -6,12 +6,10 @@ import {
   Music2,
   Trash2,
   ListMusic,
-  FolderOpen,
   RefreshCw,
   FileAudio,
   Youtube,
   Link2,
-  Download,
 } from "lucide-react";
 import { Playlist, View } from "../lib/types";
 import { cn } from "../lib/utils";

@@ -1854,7 +1854,6 @@ function App() {
             <Suspense fallback={<div className="p-8 text-spotify-lightgray">Loading...</div>}>
               <YouTubeView
                 downloadFolder={library.downloadFolder}
-                onPickDownloadFolder={handlePickDownloadFolder}
                 onDownloaded={handleYtDownloaded}
                 jobs={downloadJobs}
                 setJobs={setDownloadJobs}

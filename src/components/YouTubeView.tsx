@@ -7,7 +7,6 @@ import {
   Download,
   Loader2,
   Music2,
-  FolderOpen,
   Check,
   WifiOff,
 } from "lucide-react";
@@ -24,7 +23,6 @@ interface ProgressPayload {
 
 interface YouTubeViewProps {
   downloadFolder: string | null | undefined;
-  onPickDownloadFolder: () => void;
   onDownloaded: (filePath: string, title: string) => Promise<void>;
   jobs: DownloadJob[];
   setJobs: React.Dispatch<React.SetStateAction<DownloadJob[]>>;
@@ -32,7 +30,6 @@ interface YouTubeViewProps {
 
 export default function YouTubeView({
   downloadFolder,
-  onPickDownloadFolder,
   onDownloaded,
   jobs,
   setJobs,
@@ -225,9 +222,6 @@ export default function YouTubeView({
     );
   };
 
-  const folderLabel = downloadFolder
-    ? downloadFolder.split(/[/\\]/).filter(Boolean).pop()
-    : null;
 
   const isJobActive = (videoId: string) =>
     jobs.some(
