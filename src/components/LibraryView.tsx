@@ -350,7 +350,7 @@ export default function LibraryView({
           {onEnrichLibrary && (
             <button
               onClick={onEnrichLibrary}
-              className="flex items-center gap-1.5 rounded-md border border-green-500/30 bg-green-500/10 px-3 py-1.5 text-sm text-green-400 transition hover:border-green-500/60 hover:bg-green-500/20"
+              className="flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-spotify-lightgray transition hover:border-white/20 hover:text-white"
             >
               <Sparkles className="h-3.5 w-3.5" />
               Fix Metadata

@@ -195,18 +195,16 @@ function App() {
         if (update) {
           toast.custom((t) => (
             <div
-              className="bg-[#282828] text-white px-5 py-4 shadow-2xl rounded-2xl flex items-center gap-4 cursor-pointer border border-[#333] hover:bg-[#333] transition"
+              className="flex items-center gap-3 rounded-lg bg-[#282828] border border-white/10 px-4 py-3 shadow-lg cursor-pointer transition hover:bg-[#2e2e2e]"
               onClick={() => {
                 toast.dismiss(t.id);
                 setSettingsOpen(true);
               }}
             >
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-spotify-green/20 text-spotify-green ring-1 ring-spotify-green/30">
-                <span className="text-xl"></span>
-              </div>
+              <span className="h-2 w-2 shrink-0 rounded-full bg-spotify-green" />
               <div>
-                <p className="font-semibold text-sm">Update available (v{update.version})</p>
-                <p className="text-[13px] text-spotify-lightgray mt-0.5">Click to open settings and install</p>
+                <p className="text-sm font-semibold text-white">Update available — v{update.version}</p>
+                <p className="text-xs text-spotify-lightgray mt-0.5">Click to open Settings and install</p>
               </div>
             </div>
           ), { duration: 15000, position: "bottom-right" });
