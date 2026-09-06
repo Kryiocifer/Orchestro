@@ -35,6 +35,7 @@ import {
 } from "./lib/library";
 import { enrichSong, applyEnrichment } from "./lib/enrichment";
 import { Song, LibraryData, View, SavedPlaybackState } from "./lib/types";
+import { recordPlay } from "./lib/playHistory";
 import { isAudioFile } from "./lib/utils";
 import { fetchRemoteCoverArt } from "./lib/metadata";
 const EnrichmentModal = lazy(() => import("./components/EnrichmentModal"));
@@ -50,6 +51,7 @@ function App() {
     playlists: [],
   });
   const [currentView, setCurrentView] = useState<View>("home");
+  const [initialSearch, setInitialSearch] = useState<string>("");
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [currentCoverUrl, setCurrentCoverUrl] = useState<string | null>(null);
@@ -537,6 +539,7 @@ function App() {
       setCurrentSong(song);
       currentSongRef.current = song;
       savedPositionRef.current = startTime;
+      recordPlay(song.id);
       if (newQueue) {
         setQueue(newQueue);
         queueRef.current = newQueue;
@@ -1783,7 +1786,12 @@ function App() {
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
           currentView={currentView}
-          setCurrentView={setCurrentView}
+          setCurrentView={(view) => {
+            setCurrentView(view);
+            if (view === "library" || view === "home") {
+              setInitialSearch("");
+            }
+          }}
           playlists={library.playlists}
           activePlaylistId={activePlaylistId}
           onSelectPlaylist={(id) => {
@@ -1807,6 +1815,10 @@ function App() {
                 setActivePlaylistId(id);
                 setCurrentView("playlist");
               }}
+              onSelectArtist={(artist) => {
+                setInitialSearch(artist);
+                setCurrentView("library");
+              }}
               onAddSongs={handleAddSongsClick}
               onAddToPlaylist={(songId, playlistId) =>
                 handleAddToPlaylist([songId], playlistId)
@@ -1824,6 +1836,7 @@ function App() {
               musicFolder={library.musicFolder}
               currentSongId={currentSong?.id}
               isPlaying={isPlaying}
+              initialSearch={initialSearch}
               onPlaySong={(song, queueSongs) =>
                 playSong(song, queueSongs || library.songs)
               }

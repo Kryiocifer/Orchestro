@@ -93,9 +93,7 @@ dist
 
 # Gatsby files
 .cache/
-# Comment in the public line in if your project uses Gatsby and not Next.js
-# https://nextjs.org/blog/next-9-1#public-directory-support
-# public
+
 
 # vuepress build output
 .vuepress/dist
@@ -140,7 +138,6 @@ dist
 src-tauri/target/
 src-tauri/WixTools/
 
-# Optional: installer outputs if they ever land in the repo root
 *.exe
 *.msi
 *.dmg
@@ -184,7 +181,10 @@ Thumbs.db
 *.log
 npm-debug.log*
 
-# Updater signing key — NEVER commit this
+# Updater signing key
 *.key
 src-tauri/orchestro.key
 src-tauri/orchestro.key.pub
+
+# Future plan
+plan

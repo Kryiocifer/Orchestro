@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Song, Playlist } from "../lib/types";
 import { Play, ListMusic, Plus } from "lucide-react";
 import ContextMenu from "./ContextMenu";
+import { getRecentlyPlayed } from "../lib/playHistory";
 
 interface HomeViewProps {
   songs: Song[];
@@ -9,10 +10,18 @@ interface HomeViewProps {
   onPlaySong: (song: Song) => void;
   onAddToQueue: (songId: string) => void;
   onSelectPlaylist: (id: string) => void;
+  onSelectArtist?: (artist: string) => void;
   onAddSongs: () => void;
   onAddToPlaylist: (songId: string, playlistId: string) => void;
   onCreatePlaylistAndAdd: (songId: string) => void;
   onRemoveSong: (songId: string) => void;
+}
+
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
 }
 
 export default function HomeView({
@@ -21,6 +30,7 @@ export default function HomeView({
   onPlaySong,
   onAddToQueue,
   onSelectPlaylist,
+  onSelectArtist,
   onAddSongs,
   onAddToPlaylist,
   onCreatePlaylistAndAdd,
@@ -32,9 +42,28 @@ export default function HomeView({
     songId: string;
   } | null>(null);
 
-  const recentSongs = [...songs]
-    .sort((a, b) => b.addedAt - a.addedAt)
-    .slice(0, 10);
+  const recentSongs = useMemo(() => 
+    [...songs].sort((a, b) => b.addedAt - a.addedAt).slice(0, 10),
+  [songs]);
+
+  const recentlyPlayed = useMemo(() => 
+    getRecentlyPlayed(songs, 10),
+  [songs]);
+
+  const topArtists = useMemo(() => {
+    const map = new Map<string, { songs: Song[]; cover?: string }>();
+    for (const song of songs) {
+      const key = song.artist || "Unknown Artist";
+      if (key === "Unknown Artist" || key.toLowerCase() === "unknown") continue;
+
+      if (!map.has(key)) map.set(key, { songs: [], cover: song.cover });
+      if (!map.get(key)!.cover && song.cover) map.get(key)!.cover = song.cover;
+      map.get(key)!.songs.push(song);
+    }
+    return [...map.entries()]
+      .sort((a, b) => b[1].songs.length - a[1].songs.length)
+      .slice(0, 6);
+  }, [songs]);
 
   const handleContextMenu = (e: React.MouseEvent, songId: string) => {
     e.preventDefault();
@@ -44,7 +73,36 @@ export default function HomeView({
 
   return (
     <div className="p-8">
-      <h1 className="mb-8 text-3xl font-bold">Good evening</h1>
+      <h1 className="mb-8 text-3xl font-bold">{greeting()}</h1>
+
+      {topArtists.length >= 2 && (
+        <section className="mb-10">
+          <h2 className="mb-4 text-xl font-bold">Your Artists</h2>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+            {topArtists.map(([artistName, data]) => (
+              <button
+                key={artistName}
+                onClick={() => onSelectArtist?.(artistName)}
+                className="group flex flex-col items-center gap-3 rounded-lg bg-white/5 p-4 transition hover:bg-white/10 text-center"
+              >
+                <div className="relative aspect-square w-full overflow-hidden rounded-full bg-spotify-gray shadow-lg">
+                  {data.cover ? (
+                    <img src={data.cover} alt={artistName} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-3xl font-bold text-spotify-lightgray">
+                      {artistName.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+                <div className="w-full">
+                  <p className="truncate font-bold text-white">{artistName}</p>
+                  <p className="text-xs text-spotify-lightgray">{data.songs.length} songs</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {playlists.length > 0 && (
         <section className="mb-10">
@@ -59,10 +117,39 @@ export default function HomeView({
                 <div className="flex h-16 w-16 shrink-0 items-center justify-center bg-spotify-gray">
                   <ListMusic className="h-7 w-7 text-spotify-lightgray" />
                 </div>
-                <span className="truncate pr-4 font-semibold">
+                <span className="truncate pr-4 font-semibold text-left">
                   {playlist.name}
                 </span>
               </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {recentlyPlayed.length > 0 && (
+        <section className="mb-10">
+          <h2 className="mb-4 text-xl font-bold">Recently Played</h2>
+          <div className="flex gap-4 overflow-x-auto sidebar-scroll pb-4">
+            {recentlyPlayed.map((song) => (
+              <div
+                key={`recent-${song.id}`}
+                className="group relative flex-shrink-0 cursor-pointer w-[140px] rounded-lg bg-spotify-dark p-3 transition hover:bg-spotify-gray"
+                onClick={() => onPlaySong(song)}
+                onContextMenu={(e) => handleContextMenu(e, song.id)}
+              >
+                <div className="relative mb-3 aspect-square w-full overflow-hidden rounded-md bg-spotify-gray shadow-md">
+                  {song.cover ? (
+                    <img src={song.cover} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-2xl">🎵</div>
+                  )}
+                  <button className="absolute bottom-2 right-2 flex h-10 w-10 translate-y-3 items-center justify-center rounded-full bg-spotify-green opacity-0 shadow-xl transition group-hover:translate-y-0 group-hover:opacity-100">
+                    <Play className="h-4 w-4 fill-black text-black ml-0.5" />
+                  </button>
+                </div>
+                <p className="truncate font-semibold text-sm">{song.title}</p>
+                <p className="truncate text-xs text-spotify-lightgray mt-0.5">{song.artist}</p>
+              </div>
             ))}
           </div>
         </section>
@@ -110,11 +197,11 @@ export default function HomeView({
                     </div>
                   )}
                   <button className="absolute bottom-2 right-2 flex h-12 w-12 translate-y-3 items-center justify-center rounded-full bg-spotify-green opacity-0 shadow-xl transition group-hover:translate-y-0 group-hover:opacity-100">
-                    <Play className="h-5 w-5 fill-black text-black" />
+                    <Play className="h-5 w-5 fill-black text-black ml-1" />
                   </button>
                 </div>
                 <p className="truncate font-semibold">{song.title}</p>
-                <p className="truncate text-sm text-spotify-lightgray">
+                <p className="truncate text-sm text-spotify-lightgray mt-0.5">
                   {song.artist}
                 </p>
               </div>

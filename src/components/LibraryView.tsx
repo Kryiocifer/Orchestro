@@ -18,6 +18,7 @@ interface LibraryViewProps {
   onRemoveSong: (songIds: string[]) => void;
   onAddSongs: () => void;
   onEnrichLibrary?: () => void;
+  initialSearch?: string;
 }
 
 function getSongFolder(song: Song, musicFolder?: string | null): string {
@@ -159,12 +160,19 @@ export default function LibraryView({
   onRemoveSong,
   onAddSongs,
   onEnrichLibrary,
+  initialSearch,
 }: LibraryViewProps) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialSearch || "");
   const deferredQuery = useDeferredValue(query);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [lastClickedId, setLastClickedId] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (initialSearch !== undefined) {
+      setQuery(initialSearch);
+    }
+  }, [initialSearch]);
   const [sortConfig, setSortConfig] = useState<{ key: "sno" | "title" | "album" | "dateAdded" | "duration"; asc: boolean } | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;

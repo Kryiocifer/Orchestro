@@ -120,13 +120,11 @@ function extractMetadata(rawTitle: string): { songName: string; artistName: stri
     right = stripYtFluff(right);
     right = right.replace(/\s*(official|lyric|video|audio|visualizer)\s*$/gi, "");
 
-    const leftWords = left.split(/\s+/).filter(Boolean).length;
+
     const numbered = /^\d{1,3}\.\s+/.test(left);
     const leftLooksLikeTitle =
       numbered ||
-      /\(.*soundtrack.*\)/i.test(left) ||
-      leftWords >= 4 ||
-      left.length > right.length + 8;
+      /\(.*(soundtrack|ost).*\)/i.test(left);
 
     if (leftLooksLikeTitle) {
       songPart = stripYtFluff(left.replace(/^\d{1,3}\.\s+/, ""));
@@ -184,8 +182,9 @@ function stripYtFluff(s: string): string {
  * Simple token-overlap similarity score (0–1).
  */
 function similarity(a: string, b: string): number {
-  const tokA = new Set(a.toLowerCase().split(/\s+/).filter(Boolean));
-  const tokB = new Set(b.toLowerCase().split(/\s+/).filter(Boolean));
+  const clean = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, "").split(/\s+/).filter(Boolean);
+  const tokA = new Set(clean(a));
+  const tokB = new Set(clean(b));
   let matches = 0;
   for (const t of tokA) if (tokB.has(t)) matches++;
   const union = new Set([...tokA, ...tokB]).size;
