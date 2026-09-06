@@ -1,8 +1,9 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Song, Playlist } from "../lib/types";
 import { Play, ListMusic, Plus } from "lucide-react";
 import ContextMenu from "./ContextMenu";
 import { getRecentlyPlayed } from "../lib/playHistory";
+import { getArtistImage } from "../lib/artistImages";
 
 interface HomeViewProps {
   songs: Song[];
@@ -41,6 +42,8 @@ export default function HomeView({
     y: number;
     songId: string;
   } | null>(null);
+  
+  const [artistImages, setArtistImages] = useState<Record<string, string>>({});
 
   const recentSongs = useMemo(() => 
     [...songs].sort((a, b) => b.addedAt - a.addedAt).slice(0, 10),
@@ -51,19 +54,43 @@ export default function HomeView({
   [songs]);
 
   const topArtists = useMemo(() => {
-    const map = new Map<string, { songs: Song[]; cover?: string }>();
+    const map = new Map<string, { songs: Song[]; covers: Set<string> }>();
     for (const song of songs) {
       const key = song.artist || "Unknown Artist";
       if (key === "Unknown Artist" || key.toLowerCase() === "unknown") continue;
 
-      if (!map.has(key)) map.set(key, { songs: [], cover: song.cover });
-      if (!map.get(key)!.cover && song.cover) map.get(key)!.cover = song.cover;
+      if (!map.has(key)) map.set(key, { songs: [], covers: new Set() });
+      if (song.cover && map.get(key)!.covers.size < 4) {
+        map.get(key)!.covers.add(song.cover);
+      }
       map.get(key)!.songs.push(song);
     }
     return [...map.entries()]
       .sort((a, b) => b[1].songs.length - a[1].songs.length)
       .slice(0, 6);
   }, [songs]);
+
+  useEffect(() => {
+    let active = true;
+    const fetchImages = async () => {
+      const newImages: Record<string, string> = {};
+      let changed = false;
+      for (const [artistName] of topArtists) {
+        if (!artistImages[artistName]) {
+          const img = await getArtistImage(artistName);
+          if (img) {
+            newImages[artistName] = img;
+            changed = true;
+          }
+        }
+      }
+      if (active && changed) {
+        setArtistImages((prev) => ({ ...prev, ...newImages }));
+      }
+    };
+    fetchImages();
+    return () => { active = false; };
+  }, [topArtists]);
 
   const handleContextMenu = (e: React.MouseEvent, songId: string) => {
     e.preventDefault();
@@ -86,8 +113,16 @@ export default function HomeView({
                 className="group flex flex-col items-center gap-3 rounded-lg bg-white/5 p-4 transition hover:bg-white/10 text-center"
               >
                 <div className="relative aspect-square w-full overflow-hidden rounded-full bg-spotify-gray shadow-lg">
-                  {data.cover ? (
-                    <img src={data.cover} alt={artistName} className="h-full w-full object-cover" />
+                  {artistImages[artistName] ? (
+                    <img src={artistImages[artistName]} alt={artistName} className="h-full w-full object-cover" />
+                  ) : data.covers.size >= 4 ? (
+                    <div className="grid h-full w-full grid-cols-2 grid-rows-2">
+                      {[...data.covers].map((c, i) => (
+                        <img key={i} src={c} alt="" className="h-full w-full object-cover" />
+                      ))}
+                    </div>
+                  ) : data.covers.size >= 1 ? (
+                    <img src={[...data.covers][0]} alt={artistName} className="h-full w-full object-cover" />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-3xl font-bold text-spotify-lightgray">
                       {artistName.charAt(0).toUpperCase()}

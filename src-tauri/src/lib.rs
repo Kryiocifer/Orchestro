@@ -2183,7 +2183,8 @@ pub fn run() {
             get_song_cover,
             write_song_tags,
             path_exists,
-            list_audio_files
+            list_audio_files,
+            fetch_artist_image
         ])
         .setup(|app| {
             let app_data = app.path().app_data_dir().expect("failed to get app data dir");
@@ -2380,3 +2381,35 @@ async fn get_song_cover(path: String) -> Result<Option<String>, String> {
     
     Ok(None)
 }
+
+#[tauri::command]
+fn fetch_artist_image(artist_name: String) -> Result<Option<String>, String> {
+    let url = format!("https://api.deezer.com/search/artist?q={}", urlencoding::encode(&artist_name));
+    let resp = reqwest::blocking::get(&url).map_err(|e| e.to_string())?;
+    
+    if !resp.status().is_success() {
+        return Ok(None);
+    }
+    
+    let json: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+    if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
+        let best_match = data.iter().max_by_key(|a| {
+            a.get("nb_fan").and_then(|f| f.as_u64()).unwrap_or(0)
+        });
+
+        if let Some(artist) = best_match {
+            if let Some(picture) = artist.get("picture_xl")
+                .or_else(|| artist.get("picture_big"))
+                .or_else(|| artist.get("picture_medium"))
+                .or_else(|| artist.get("picture")) 
+            {
+                if let Some(url_str) = picture.as_str() {
+                    return Ok(Some(url_str.to_string()));
+                }
+            }
+        }
+    }
+    
+    Ok(None)
+}
+
