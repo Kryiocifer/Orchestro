@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useDeferredValue, useRef, useCallback } from "react";
+import React, { useMemo, useState, useEffect, useDeferredValue, useRef, useCallback } from "react";
 import { Song, Playlist } from "../lib/types";
 import { Play, Clock, Plus, Search, Check, Sparkles } from "lucide-react";
 import { formatDuration } from "../lib/utils";
@@ -58,6 +58,12 @@ interface LibrarySongRowProps {
 const LibrarySongRow = React.memo(({
   song, index, isCurrent, isPlaying, isSelected, selectedCount, onRowClick, onContextMenu, onCheckboxClick
 }: LibrarySongRowProps) => {
+  const [imgError, setImgError] = useState(false);
+
+  useEffect(() => {
+    setImgError(false);
+  }, [song.cover]);
+
   return (
     <div
       onClick={(e) => onRowClick(e, song, index)}
@@ -99,12 +105,13 @@ const LibrarySongRow = React.memo(({
 
       <div className="flex min-w-0 items-center gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded bg-spotify-gray">
-          {song.cover ? (
+          {song.cover && !imgError ? (
             <img
               src={song.cover}
               alt=""
               loading="lazy"
               className="h-full w-full object-cover"
+              onError={() => setImgError(true)}
             />
           ) : (
             <span className="text-lg">🎵</span>
@@ -140,6 +147,7 @@ const LibrarySongRow = React.memo(({
   );
 }, (prev, next) => {
   return prev.song.id === next.song.id &&
+         prev.song.cover === next.song.cover &&
          prev.index === next.index &&
          prev.isCurrent === next.isCurrent &&
          prev.isPlaying === next.isPlaying &&

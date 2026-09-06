@@ -32,6 +32,7 @@ import {
   importM3UPlaylist,
   setDownloadFolder,
   addSongFromPath,
+  backfillCovers,
 } from "./lib/library";
 import { enrichSong, applyEnrichment } from "./lib/enrichment";
 import { Song, LibraryData, View, SavedPlaybackState } from "./lib/types";
@@ -274,6 +275,11 @@ function App() {
       return;
     }
 
+    if (currentSong.cover) {
+      setCurrentCoverUrl(currentSong.cover);
+      return;
+    }
+
     if (coverCache.has(currentSong.path)) {
       setCurrentCoverUrl(coverCache.get(currentSong.path)!);
       return;
@@ -406,7 +412,18 @@ function App() {
         console.warn("Session restore error:", err);
       }
 
-      void runDurationHydration(songs);
+      void (async () => {
+        await runDurationHydration(songs);
+        try {
+          const filled = await backfillCovers();
+          if (filled > 0) {
+            const refreshed = await loadLibrary();
+            setLibrary(refreshed);
+          }
+        } catch (e) {
+          console.warn("Cover backfill failed on startup:", e);
+        }
+      })();
     })();
     return () => {
       hydrateCancelRef.current = true;
@@ -1273,7 +1290,23 @@ function App() {
       } else {
         toast(`Rescan complete · ${skipped} unchanged`, { icon: "✓" });
       }
-      void runDurationHydration(fresh.songs);
+      // Run background jobs sequentially to avoid race condition on saveLibrary
+      (async () => {
+        await hydrateMissingDurations(fresh.songs, (updatedSong) => {
+          setLibrary((prev) => ({
+            ...prev,
+            songs: prev.songs.map((s) => (s.id === updatedSong.id ? updatedSong : s)),
+          }));
+        });
+        
+        toast("Extracting cover art…", { icon: "🖼️" });
+        const filled = await backfillCovers();
+        if (filled > 0) {
+          const refreshed = await loadLibrary();
+          setLibrary(refreshed);
+          toast.success(`Loaded ${filled} cover image${filled === 1 ? "" : "s"}`);
+        }
+      })();
     } catch (err) {
       console.error(err);
       setIsScanning(false);

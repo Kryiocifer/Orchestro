@@ -18,6 +18,14 @@ interface HomeViewProps {
   onRemoveSong: (songId: string) => void;
 }
 
+function CoverImage({ src, alt, className, fallbackSize = "text-2xl" }: { src?: string; alt?: string; className?: string; fallbackSize?: string }) {
+  const [error, setError] = useState(false);
+  if (!src || error) {
+    return <div className={`flex h-full w-full items-center justify-center ${fallbackSize}`}>🎵</div>;
+  }
+  return <img src={src} alt={alt || ""} className={className} onError={() => setError(true)} />;
+}
+
 function greeting(): string {
   const h = new Date().getHours();
   if (h < 12) return "Good morning";
@@ -164,26 +172,24 @@ export default function HomeView({
       {recentlyPlayed.length > 0 && (
         <section className="mb-10">
           <h2 className="mb-4 text-xl font-bold">Recently Played</h2>
-          <div className="flex gap-4 overflow-x-auto sidebar-scroll pb-4">
+          <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {recentlyPlayed.map((song) => (
               <div
                 key={`recent-${song.id}`}
-                className="group relative flex-shrink-0 cursor-pointer w-[140px] rounded-lg bg-spotify-dark p-3 transition hover:bg-spotify-gray"
+                className="group relative cursor-pointer rounded-lg bg-spotify-dark p-4 transition hover:bg-spotify-gray"
                 onClick={() => onPlaySong(song)}
                 onContextMenu={(e) => handleContextMenu(e, song.id)}
               >
-                <div className="relative mb-3 aspect-square w-full overflow-hidden rounded-md bg-spotify-gray shadow-md">
-                  {song.cover ? (
-                    <img src={song.cover} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-2xl">🎵</div>
-                  )}
-                  <button className="absolute bottom-2 right-2 flex h-10 w-10 translate-y-3 items-center justify-center rounded-full bg-spotify-green opacity-0 shadow-xl transition group-hover:translate-y-0 group-hover:opacity-100">
-                    <Play className="h-4 w-4 fill-black text-black ml-0.5" />
+                <div className="relative mb-4 aspect-square overflow-hidden rounded-md bg-spotify-gray shadow-lg">
+                  <CoverImage src={song.cover} className="h-full w-full object-cover" fallbackSize="text-4xl" />
+                  <button className="absolute bottom-2 right-2 flex h-12 w-12 translate-y-3 items-center justify-center rounded-full bg-spotify-green opacity-0 shadow-xl transition group-hover:translate-y-0 group-hover:opacity-100">
+                    <Play className="h-5 w-5 fill-black text-black ml-1" />
                   </button>
                 </div>
-                <p className="truncate font-semibold text-sm">{song.title}</p>
-                <p className="truncate text-xs text-spotify-lightgray mt-0.5">{song.artist}</p>
+                <p className="truncate font-bold">{song.title}</p>
+                <p className="truncate text-sm text-spotify-lightgray mt-1">
+                  {song.artist}
+                </p>
               </div>
             ))}
           </div>
@@ -220,17 +226,7 @@ export default function HomeView({
                 onContextMenu={(e) => handleContextMenu(e, song.id)}
               >
                 <div className="relative mb-4 aspect-square overflow-hidden rounded-md bg-spotify-gray shadow-lg">
-                  {song.cover ? (
-                    <img
-                      src={song.cover}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-4xl">
-                      🎵
-                    </div>
-                  )}
+                  <CoverImage src={song.cover} className="h-full w-full object-cover" fallbackSize="text-4xl" />
                   <button className="absolute bottom-2 right-2 flex h-12 w-12 translate-y-3 items-center justify-center rounded-full bg-spotify-green opacity-0 shadow-xl transition group-hover:translate-y-0 group-hover:opacity-100">
                     <Play className="h-5 w-5 fill-black text-black ml-1" />
                   </button>

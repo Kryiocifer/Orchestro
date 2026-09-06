@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { appDataDir, join, dirname } from "@tauri-apps/api/path";
 import {
   readTextFile,
@@ -40,6 +40,14 @@ function isAudioFileName(fileName: string): boolean {
 async function getLibraryJsonPath(): Promise<string> {
   const dataDir = await appDataDir();
   return await join(dataDir, LIBRARY_FILE);
+}
+
+function djb2(str: string): string {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash) + str.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(16);
 }
 
 async function getSongsDir(): Promise<string> {
@@ -86,10 +94,10 @@ export async function loadLibrary(): Promise<LibraryData> {
     if (data.spotifyClientId === undefined) data.spotifyClientId = null;
     if (data.spotifyClientSecret === undefined) data.spotifyClientSecret = null;
 
-    // Strip embedded covers — they explode RAM (hundreds of MB) and aren't needed for scan/list
+    // Strip legacy embedded base64 covers — only strip base64 data URIs to avoid JSON bloat
     let stripped = false;
     for (const s of data.songs || []) {
-      if (s.cover) {
+      if (s.cover && s.cover.startsWith("data:image")) {
         delete s.cover;
         stripped = true;
       }
@@ -116,8 +124,12 @@ export async function saveLibrary(data: LibraryData): Promise<void> {
       ...data,
       songs: (data.songs || []).map((s) => {
         if (!s.cover) return s;
-        const { cover, ...rest } = s;
-        return rest as typeof s;
+        // Only strip base64 covers to prevent JSON bloat
+        if (s.cover.startsWith("data:image")) {
+          const { cover, ...rest } = s;
+          return rest as typeof s;
+        }
+        return s;
       }),
     };
     const path = await getLibraryJsonPath();
@@ -166,17 +178,36 @@ async function extractMetadata(
       duration: !light,
     } as any);
 
+    const title = metadata.common.title || fileName.replace(/\.[^/.]+$/, "") || "Unknown Title";
+    const artist = metadata.common.artist || metadata.common.artists?.[0] || "Unknown Artist";
+    const album = metadata.common.album || "Unknown Album";
+    const duration = light ? 0 : metadata.format.duration || 0;
+
+    let coverUrl: string | undefined = undefined;
+    if (!light) {
+      try {
+        const dataDir = await appDataDir();
+        const coversDir = await join(dataDir, "library", "covers");
+        const hash = djb2(filePath); // Hash by filePath so every song gets its own accurate cover
+        const extractedPath = await invoke<string | null>("extract_and_save_cover", {
+          songPath: filePath,
+          coversDir,
+          hash
+        });
+        if (extractedPath) {
+          coverUrl = convertFileSrc(extractedPath);
+        }
+      } catch (err) {
+        console.warn("Failed to extract cover art:", err);
+      }
+    }
+
     return {
-      title:
-        metadata.common.title ||
-        fileName.replace(/\.[^/.]+$/, "") ||
-        "Unknown Title",
-      artist:
-        metadata.common.artist ||
-        metadata.common.artists?.[0] ||
-        "Unknown Artist",
-      album: metadata.common.album || "Unknown Album",
-      duration: light ? 0 : metadata.format.duration || 0,
+      title,
+      artist,
+      album,
+      duration,
+      cover: coverUrl,
     };
   } catch {
     return fallback;
@@ -267,15 +298,10 @@ export async function hydrateMissingDurations(
         if (target) {
           target.duration = meta.duration;
           // Prefer better title/artist if still generic
-          if (meta.title && (!target.title || target.title === "Unknown Title")) {
-            target.title = meta.title;
-          }
-          if (meta.artist && target.artist === "Unknown Artist") {
-            target.artist = meta.artist;
-          }
-          if (meta.album && target.album === "Unknown Album") {
-            target.album = meta.album;
-          }
+          if (target.title === "Unknown Title" && meta.title) target.title = meta.title;
+          if (target.artist === "Unknown Artist" && meta.artist) target.artist = meta.artist;
+          if (target.album === "Unknown Album" && meta.album) target.album = meta.album;
+          if (meta.cover && !target.cover) target.cover = meta.cover;
           updated++;
           onProgress?.({ ...target });
         }
@@ -421,9 +447,8 @@ export async function scanMusicFolder(): Promise<{
         existing.title = meta.title || existing.title;
         existing.artist = meta.artist || existing.artist;
         existing.album = meta.album || existing.album;
-        // Keep existing duration/cover if light scan didn't provide them
+        // Keep existing duration if light scan didn't provide them
         if (meta.duration) existing.duration = meta.duration;
-        // Never write covers during bulk scan (base64 blows RAM / crashes WebView)
 
         newSongs.push(existing);
         seenIds.add(existing.id);
@@ -510,6 +535,52 @@ export async function scanMusicFolder(): Promise<{
   }
 
   return { library, added, skipped, updated, removed };
+}
+
+/**
+ * Backfills missing cover thumbnails for all songs in the library.
+ * Extracts embedded ID3 art, resizes it to 256x256, and saves it to
+ * appDataDir/library/covers/<hash>.jpg. Updates song.cover to the local asset URL.
+ */
+export async function backfillCovers(
+  onProgress?: (done: number, total: number) => void
+): Promise<number> {
+  const library = await loadLibrary();
+  const dataDir = await appDataDir();
+  const coversDir = await join(dataDir, "library", "covers");
+  let updatedCount = 0;
+  let changed = false;
+
+  for (let i = 0; i < library.songs.length; i++) {
+    const song = library.songs[i];
+    const expectedHash = djb2(song.path);
+    if (!song.cover || !song.cover.includes(expectedHash)) {
+      try {
+        const extractedPath = await invoke<string | null>("extract_and_save_cover", {
+          songPath: song.path,
+          coversDir,
+          hash: expectedHash,
+        });
+        if (extractedPath) {
+          song.cover = convertFileSrc(extractedPath);
+          updatedCount++;
+          changed = true;
+        } else if (song.cover) {
+          delete song.cover;
+          updatedCount++;
+          changed = true;
+        }
+      } catch (err) {
+        console.warn("Cover backfill failed for", song.title, err);
+      }
+    }
+    onProgress?.(i + 1, library.songs.length);
+    // Yield to prevent UI freeze
+    if (i % 10 === 0) await new Promise((r) => setTimeout(r, 0));
+  }
+
+  if (changed) await saveLibrary(library);
+  return updatedCount;
 }
 
 
@@ -749,6 +820,32 @@ export async function addSongsBatch(
     existingPaths.add(finalKey);
     results.push({ song, alreadyExists: false });
     changed = true;
+  }
+
+  // Backfill missing covers for existing songs
+  const dataDir = await appDataDir();
+  const coversDir = await join(dataDir, "library", "covers");
+  for (let i = 0; i < library.songs.length; i++) {
+    const song = library.songs[i];
+    const expectedHash = djb2(song.path);
+    if (!song.cover || !song.cover.includes(expectedHash)) {
+      try {
+        const extractedPath = await invoke<string | null>("extract_and_save_cover", {
+          songPath: song.path,
+          coversDir,
+          hash: expectedHash,
+        });
+        if (extractedPath) {
+          song.cover = convertFileSrc(extractedPath);
+          changed = true;
+        } else if (song.cover) {
+          delete song.cover;
+          changed = true;
+        }
+      } catch (err) {
+        console.warn("Cover backfill failed for", song.title, err);
+      }
+    }
   }
 
   if (changed) await saveLibrary(library);

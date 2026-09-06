@@ -2184,7 +2184,8 @@ pub fn run() {
             write_song_tags,
             path_exists,
             list_audio_files,
-            fetch_artist_image
+            fetch_artist_image,
+            extract_and_save_cover
         ])
         .setup(|app| {
             let app_data = app.path().app_data_dir().expect("failed to get app data dir");
@@ -2406,6 +2407,35 @@ fn fetch_artist_image(artist_name: String) -> Result<Option<String>, String> {
                 if let Some(url_str) = picture.as_str() {
                     return Ok(Some(url_str.to_string()));
                 }
+            }
+        }
+    }
+    
+    Ok(None)
+}
+
+#[tauri::command]
+fn extract_and_save_cover(song_path: String, covers_dir: String, hash: String) -> Result<Option<String>, String> {
+    let tag = match id3::Tag::read_from_path(&song_path) {
+        Ok(t) => t,
+        Err(_) => return Ok(None)
+    };
+
+    if let Some(pic) = tag.pictures().next() {
+        let dest = std::path::PathBuf::from(&covers_dir).join(format!("{}.jpg", hash));
+        if dest.exists() {
+            return Ok(Some(dest.to_string_lossy().to_string()));
+        }
+
+        if let Ok(_) = std::fs::create_dir_all(&covers_dir) {
+            if let Ok(img) = image::load_from_memory(&pic.data) {
+                let resized = img.thumbnail(256, 256);
+                if resized.save_with_format(&dest, image::ImageFormat::Jpeg).is_ok() {
+                    return Ok(Some(dest.to_string_lossy().to_string()));
+                }
+            } else {
+                let _ = std::fs::write(&dest, &pic.data);
+                return Ok(Some(dest.to_string_lossy().to_string()));
             }
         }
     }
