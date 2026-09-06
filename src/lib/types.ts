@@ -41,6 +41,7 @@ export interface LibraryData {
   spotifyClientId?: string | null;
   spotifyClientSecret?: string | null;
   lastPlayed?: SavedPlaybackState | null;
+  gameMode?: boolean;
 }
 
 export type View = "home" | "library" | "playlist" | "youtube" | "import";

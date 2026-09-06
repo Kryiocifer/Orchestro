@@ -546,6 +546,7 @@ export async function backfillCovers(
   onProgress?: (done: number, total: number) => void
 ): Promise<number> {
   const library = await loadLibrary();
+  if (library.gameMode) return 0;
   const dataDir = await appDataDir();
   const coversDir = await join(dataDir, "library", "covers");
   let updatedCount = 0;

@@ -24,6 +24,8 @@ interface SettingsModalProps {
   checkingUpdates?: boolean;
   onRescan: () => void;
   isScanning?: boolean;
+  gameMode?: boolean;
+  onToggleGameMode?: (enabled: boolean) => void;
 }
 
 export default function SettingsModal({
@@ -37,6 +39,8 @@ export default function SettingsModal({
   checkingUpdates,
   onRescan,
   isScanning,
+  gameMode,
+  onToggleGameMode,
 }: SettingsModalProps) {
   const [ytdlpStatus, setYtdlpStatus] = useState<{
     available: boolean;
@@ -317,6 +321,37 @@ export default function SettingsModal({
                   {downloadingFfmpeg ? "Downloading…" : ffmpegAvailable ? "Installed" : "Download"}
                 </button>
               </div>
+            </div>
+          </div>
+
+          {/* Section: Performance */}
+          <div className="px-6 py-5 border-b border-white/5">
+            <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-spotify-lightgray/50">
+              Performance
+            </p>
+            <div className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.03] px-4 py-3">
+              <div>
+                <p className="text-sm font-medium text-white">Game Mode</p>
+                <p className="mt-0.5 text-xs text-spotify-lightgray max-w-[280px]">
+                  Pause background scanning, disable heavy UI animations, and unload album art to save RAM and CPU.
+                </p>
+              </div>
+              <button
+                onClick={() => onToggleGameMode?.(!gameMode)}
+                className={cn(
+                  "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                  gameMode ? "bg-spotify-green" : "bg-white/20"
+                )}
+                role="switch"
+                aria-checked={gameMode}
+              >
+                <span
+                  className={cn(
+                    "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                    gameMode ? "translate-x-4" : "translate-x-0"
+                  )}
+                />
+              </button>
             </div>
           </div>
 

@@ -19,6 +19,7 @@ interface LibraryViewProps {
   onAddSongs: () => void;
   onEnrichLibrary?: () => void;
   initialSearch?: string;
+  gameMode?: boolean;
 }
 
 function getSongFolder(song: Song, musicFolder?: string | null): string {
@@ -53,10 +54,11 @@ interface LibrarySongRowProps {
   onRowClick: (e: React.MouseEvent, song: Song, index: number) => void;
   onContextMenu: (e: React.MouseEvent, songId: string) => void;
   onCheckboxClick: (e: React.MouseEvent, songId: string) => void;
+  gameMode?: boolean;
 }
 
 const LibrarySongRow = React.memo(({
-  song, index, isCurrent, isPlaying, isSelected, selectedCount, onRowClick, onContextMenu, onCheckboxClick
+  song, index, isCurrent, isPlaying, isSelected, selectedCount, onRowClick, onContextMenu, onCheckboxClick, gameMode
 }: LibrarySongRowProps) => {
   const [imgError, setImgError] = useState(false);
 
@@ -105,7 +107,7 @@ const LibrarySongRow = React.memo(({
 
       <div className="flex min-w-0 items-center gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded bg-spotify-gray">
-          {song.cover && !imgError ? (
+          {song.cover && !imgError && !gameMode ? (
             <img
               src={song.cover}
               alt=""
@@ -152,7 +154,8 @@ const LibrarySongRow = React.memo(({
          prev.isCurrent === next.isCurrent &&
          prev.isPlaying === next.isPlaying &&
          prev.isSelected === next.isSelected &&
-         prev.selectedCount === next.selectedCount;
+         prev.selectedCount === next.selectedCount &&
+         prev.gameMode === next.gameMode;
 });
 
 export default function LibraryView({
@@ -169,6 +172,7 @@ export default function LibraryView({
   onAddSongs,
   onEnrichLibrary,
   initialSearch,
+  gameMode,
 }: LibraryViewProps) {
   const [query, setQuery] = useState(initialSearch || "");
   const deferredQuery = useDeferredValue(query);
@@ -484,6 +488,7 @@ export default function LibraryView({
                   onRowClick={onRowClickStable}
                   onContextMenu={onContextMenuStable}
                   onCheckboxClick={onCheckboxClickStable}
+                  gameMode={gameMode}
                 />
               );
             })}

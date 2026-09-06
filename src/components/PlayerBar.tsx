@@ -40,8 +40,9 @@ interface PlayerBarProps {
   onPlayQueueItem?: (song: Song) => void;
   onRemoveFromQueue?: (index: number) => void;
   onClearQueue?: () => void;
-  onSongInfoClick?: () => void;
   onOpenEqualizer?: () => void;
+  onSongInfoClick?: () => void;
+  gameMode?: boolean;
 }
 
 export default function PlayerBar({
@@ -65,6 +66,7 @@ export default function PlayerBar({
   onClearQueue,
   onSongInfoClick,
   onOpenEqualizer,
+  gameMode,
 }: PlayerBarProps) {
   const [showQueue, setShowQueue] = useState(false);
   const queueMenuRef = useRef<HTMLDivElement>(null);
@@ -102,7 +104,7 @@ export default function PlayerBar({
             style={{ cursor: onSongInfoClick ? "pointer" : "default" }}
           >
             <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded bg-spotify-gray">
-              {coverUrl || currentSong.cover ? (
+              {(coverUrl || currentSong.cover) && !gameMode ? (
                 <img
                   src={coverUrl || currentSong.cover}
                   alt=""

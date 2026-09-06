@@ -16,11 +16,12 @@ interface HomeViewProps {
   onAddToPlaylist: (songId: string, playlistId: string) => void;
   onCreatePlaylistAndAdd: (songId: string) => void;
   onRemoveSong: (songId: string) => void;
+  gameMode?: boolean;
 }
 
-function CoverImage({ src, alt, className, fallbackSize = "text-2xl" }: { src?: string; alt?: string; className?: string; fallbackSize?: string }) {
+function CoverImage({ src, alt, className, fallbackSize = "text-2xl", gameMode }: { src?: string; alt?: string; className?: string; fallbackSize?: string; gameMode?: boolean }) {
   const [error, setError] = useState(false);
-  if (!src || error) {
+  if (!src || error || gameMode) {
     return <div className={`flex h-full w-full items-center justify-center ${fallbackSize}`}>🎵</div>;
   }
   return <img src={src} alt={alt || ""} className={className} onError={() => setError(true)} />;
@@ -44,6 +45,7 @@ export default function HomeView({
   onAddToPlaylist,
   onCreatePlaylistAndAdd,
   onRemoveSong,
+  gameMode,
 }: HomeViewProps) {
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -79,6 +81,7 @@ export default function HomeView({
   }, [songs]);
 
   useEffect(() => {
+    if (gameMode) return;
     let active = true;
     const fetchImages = async () => {
       const newImages: Record<string, string> = {};
@@ -98,7 +101,7 @@ export default function HomeView({
     };
     fetchImages();
     return () => { active = false; };
-  }, [topArtists]);
+  }, [topArtists, gameMode]);
 
   const handleContextMenu = (e: React.MouseEvent, songId: string) => {
     e.preventDefault();
@@ -121,7 +124,11 @@ export default function HomeView({
                 className="group flex flex-col items-center gap-3 rounded-lg bg-white/5 p-4 transition hover:bg-white/10 text-center"
               >
                 <div className="relative aspect-square w-full overflow-hidden rounded-full bg-spotify-gray shadow-lg">
-                  {artistImages[artistName] ? (
+                  {gameMode ? (
+                    <div className="flex h-full w-full items-center justify-center text-3xl font-bold text-spotify-lightgray">
+                      {artistName.charAt(0).toUpperCase()}
+                    </div>
+                  ) : artistImages[artistName] ? (
                     <img src={artistImages[artistName]} alt={artistName} className="h-full w-full object-cover" />
                   ) : data.covers.size >= 4 ? (
                     <div className="grid h-full w-full grid-cols-2 grid-rows-2">

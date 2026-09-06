@@ -26,14 +26,15 @@ fn hide_console_tokio(cmd: &mut tokio::process::Command) -> &mut tokio::process:
     cmd
 }
 use std::thread;
-use tauri::{AppHandle, Emitter, Manager};
-use tauri::menu::{Menu, MenuItem};
+use tauri::{AppHandle, Emitter, Manager, Wry};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
 /// Active yt-dlp PIDs keyed by job_id (for cancel)
 static DOWNLOAD_PIDS: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
+static TRAY_GAME_MODE_ITEM: Mutex<Option<CheckMenuItem<Wry>>> = Mutex::new(None);
 
 fn pids() -> std::sync::MutexGuard<'static, Option<HashMap<String, u32>>> {
     let mut g = DOWNLOAD_PIDS.lock().unwrap();
@@ -2185,7 +2186,9 @@ pub fn run() {
             path_exists,
             list_audio_files,
             fetch_artist_image,
-            extract_and_save_cover
+            extract_and_save_cover,
+            optimize_memory,
+            sync_tray_game_mode
         ])
         .setup(|app| {
             let app_data = app.path().app_data_dir().expect("failed to get app data dir");
@@ -2195,8 +2198,31 @@ pub fn run() {
             std::fs::create_dir_all(&bin_dir).ok();
 
             let show_item = MenuItem::with_id(app, "show", "Open Orchestro", true, None::<&str>)?;
+
+            let library_file = app_data.join("library.json");
+            let initial_game_mode = if let Ok(data) = std::fs::read_to_string(&library_file) {
+                serde_json::from_str::<serde_json::Value>(&data)
+                    .ok()
+                    .and_then(|v| v.get("gameMode").and_then(|g| g.as_bool()))
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+
+            let game_mode_item = CheckMenuItem::with_id(
+                app,
+                "game_mode",
+                "Game Mode",
+                true,
+                initial_game_mode,
+                None::<&str>,
+            )?;
+            if let Ok(mut guard) = TRAY_GAME_MODE_ITEM.lock() {
+                *guard = Some(game_mode_item.clone());
+            }
+
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            let menu = Menu::with_items(app, &[&show_item, &game_mode_item, &quit_item])?;
 
             let mut tray_builder = TrayIconBuilder::new()
                 .tooltip("Orchestro")
@@ -2209,6 +2235,34 @@ pub fn run() {
                                 let _ = window.show();
                                 let _ = window.unminimize();
                                 let _ = window.set_focus();
+                            }
+                        }
+                        "game_mode" => {
+                            if let Ok(guard) = TRAY_GAME_MODE_ITEM.lock() {
+                                if let Some(item) = guard.as_ref() {
+                                    let is_checked = item.is_checked().unwrap_or(false);
+
+                                    // Persist to library.json
+                                    if let Ok(app_data) = app.path().app_data_dir() {
+                                        let path = app_data.join("library.json");
+                                        if let Ok(data) = std::fs::read_to_string(&path) {
+                                            if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&data) {
+                                                if let Some(obj) = json.as_object_mut() {
+                                                    obj.insert("gameMode".to_string(), serde_json::Value::Bool(is_checked));
+                                                    if let Ok(serialized) = serde_json::to_string_pretty(&json) {
+                                                        let _ = std::fs::write(&path, serialized);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if is_checked {
+                                        memory_trim::trim_all_app_processes();
+                                    }
+
+                                    let _ = app.emit("game-mode-toggled", serde_json::json!({ "gameMode": is_checked }));
+                                }
                             }
                         }
                         "quit" => {
@@ -2441,5 +2495,133 @@ fn extract_and_save_cover(song_path: String, covers_dir: String, hash: String) -
     }
     
     Ok(None)
+}
+
+#[cfg(windows)]
+mod memory_trim {
+    use std::collections::HashSet;
+    use std::ffi::c_void;
+
+    type HANDLE = *mut c_void;
+    type BOOL = i32;
+    type DWORD = u32;
+
+    const TH32CS_SNAPPROCESS: DWORD = 0x0000_0002;
+    const PROCESS_SET_QUOTA: DWORD = 0x0100;
+    const PROCESS_QUERY_INFORMATION: DWORD = 0x0400;
+    const PROCESS_QUERY_LIMITED_INFORMATION: DWORD = 0x1000;
+    const INVALID_HANDLE_VALUE: HANDLE = -1isize as HANDLE;
+
+    #[repr(C)]
+    struct PROCESSENTRY32W {
+        dw_size: DWORD,
+        cnt_usage: DWORD,
+        th32_process_id: DWORD,
+        th32_default_heap_id: usize,
+        th32_module_id: DWORD,
+        cnt_threads: DWORD,
+        th32_parent_process_id: DWORD,
+        pc_pri_class_base: i32,
+        dw_flags: DWORD,
+        sz_exe_file: [u16; 260],
+    }
+
+    extern "system" {
+        fn GetCurrentProcess() -> HANDLE;
+        fn GetCurrentProcessId() -> DWORD;
+        fn SetProcessWorkingSetSize(
+            h_process: HANDLE,
+            dw_minimum_working_set_size: usize,
+            dw_maximum_working_set_size: usize,
+        ) -> BOOL;
+        fn K32EmptyWorkingSet(h_process: HANDLE) -> BOOL;
+        fn OpenProcess(
+            dw_desired_access: DWORD,
+            b_inherit_handle: BOOL,
+            dw_process_id: DWORD,
+        ) -> HANDLE;
+        fn CloseHandle(h_object: HANDLE) -> BOOL;
+        fn CreateToolhelp32Snapshot(dw_flags: DWORD, th32_process_id: DWORD) -> HANDLE;
+        fn Process32FirstW(h_snapshot: HANDLE, lppe: *mut PROCESSENTRY32W) -> BOOL;
+        fn Process32NextW(h_snapshot: HANDLE, lppe: *mut PROCESSENTRY32W) -> BOOL;
+    }
+
+    pub fn trim_all_app_processes() {
+        unsafe {
+            let my_pid = GetCurrentProcessId();
+            let my_handle = GetCurrentProcess();
+            // Trim current process (orchestro.exe)
+            K32EmptyWorkingSet(my_handle);
+            SetProcessWorkingSetSize(my_handle, usize::MAX, usize::MAX);
+
+            // Snapshot processes to find all child/descendant processes (e.g. msedgewebview2.exe)
+            let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snapshot == INVALID_HANDLE_VALUE {
+                return;
+            }
+
+            let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+            entry.dw_size = std::mem::size_of::<PROCESSENTRY32W>() as DWORD;
+
+            let mut procs = Vec::new();
+            if Process32FirstW(snapshot, &mut entry) != 0 {
+                loop {
+                    procs.push((entry.th32_process_id, entry.th32_parent_process_id));
+                    if Process32NextW(snapshot, &mut entry) == 0 {
+                        break;
+                    }
+                }
+            }
+            CloseHandle(snapshot);
+
+            let mut parent_pids = HashSet::new();
+            parent_pids.insert(my_pid);
+
+            let mut to_trim = Vec::new();
+            let mut changed = true;
+            while changed {
+                changed = false;
+                for &(pid, ppid) in &procs {
+                    if parent_pids.contains(&ppid) && !parent_pids.contains(&pid) {
+                        parent_pids.insert(pid);
+                        to_trim.push(pid);
+                        changed = true;
+                    }
+                }
+            }
+
+            // Trim working set on all descendant processes (msedgewebview2 processes)
+            for pid in to_trim {
+                let access = PROCESS_SET_QUOTA | PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION;
+                let h_proc = OpenProcess(access, 0, pid);
+                if !h_proc.is_null() && h_proc != INVALID_HANDLE_VALUE {
+                    K32EmptyWorkingSet(h_proc);
+                    SetProcessWorkingSetSize(h_proc, usize::MAX, usize::MAX);
+                    CloseHandle(h_proc);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+mod memory_trim {
+    pub fn trim_all_app_processes() {}
+}
+
+#[tauri::command]
+fn optimize_memory() -> Result<bool, String> {
+    memory_trim::trim_all_app_processes();
+    Ok(true)
+}
+
+#[tauri::command]
+fn sync_tray_game_mode(enabled: bool) -> Result<(), String> {
+    if let Ok(guard) = TRAY_GAME_MODE_ITEM.lock() {
+        if let Some(item) = guard.as_ref() {
+            let _ = item.set_checked(enabled);
+        }
+    }
+    Ok(())
 }
 

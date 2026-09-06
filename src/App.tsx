@@ -44,7 +44,7 @@ const SettingsModal = lazy(() => import("./components/SettingsModal"));
 const ChangelogModal = lazy(() => import("./components/ChangelogModal"));
 import type { DownloadJob } from "./components/DownloadPanel";
 
-const coverCache = new Map<string, string | null>();
+export const coverCache = new Map<string, string | null>();
 
 function App() {
   const [library, setLibrary] = useState<LibraryData>({
@@ -1351,6 +1351,86 @@ function App() {
     }
   };
 
+  const triggerMemoryOptimization = useCallback(async () => {
+    try {
+      await invoke("optimize_memory");
+    } catch (e) {
+      console.warn("Memory optimization invoke failed:", e);
+    }
+  }, []);
+
+  const handleToggleGameMode = async (enabled: boolean) => {
+    const updated = { ...library, gameMode: enabled };
+    setLibrary(updated);
+    await saveLibrary(updated);
+    try {
+      await invoke("sync_tray_game_mode", { enabled });
+    } catch (e) {
+      console.warn("Failed to sync tray game mode:", e);
+    }
+    if (enabled) {
+      coverCache.clear();
+      await triggerMemoryOptimization();
+      toast.success("Game Mode enabled. RAM optimized.");
+    } else {
+      toast.success("Game Mode disabled.");
+    }
+  };
+
+  // Listen for Game Mode toggles triggered from the Windows system tray icon
+  useEffect(() => {
+    let unlistenFn: (() => void) | undefined;
+    listen<{ gameMode: boolean }>("game-mode-toggled", (event) => {
+      const isEnabled = event.payload.gameMode;
+      setLibrary((prev) => ({ ...prev, gameMode: isEnabled }));
+      if (isEnabled) {
+        coverCache.clear();
+        triggerMemoryOptimization();
+        toast.success("Game Mode enabled via Tray. RAM optimized.");
+      } else {
+        toast.success("Game Mode disabled via Tray.");
+      }
+    }).then((fn) => {
+      unlistenFn = fn;
+    });
+
+    return () => {
+      unlistenFn?.();
+    };
+  }, [triggerMemoryOptimization]);
+
+  // Aggressive memory trimmer while Game Mode is active
+  useEffect(() => {
+    if (!library.gameMode) return;
+
+    // Immediately trim once active
+    triggerMemoryOptimization();
+
+    // Trim whenever user tabs out or minimizes to play their game
+    const handleBlur = () => {
+      triggerMemoryOptimization();
+    };
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        triggerMemoryOptimization();
+      }
+    };
+
+    window.addEventListener("blur", handleBlur);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    // Keep working set purged periodically (every 30s) while in game mode
+    const interval = setInterval(() => {
+      triggerMemoryOptimization();
+    }, 30000);
+
+    return () => {
+      window.removeEventListener("blur", handleBlur);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      clearInterval(interval);
+    };
+  }, [library.gameMode, triggerMemoryOptimization]);
+
   const handleCheckUpdates = async () => {
     if (checkingUpdates) return;
     setCheckingUpdates(true);
@@ -1842,6 +1922,7 @@ function App() {
             <HomeView
               songs={library.songs}
               playlists={library.playlists}
+              gameMode={library.gameMode}
               onPlaySong={(song) => playSong(song, library.songs)}
               onAddToQueue={addToQueue}
               onSelectPlaylist={(id) => {
@@ -1866,6 +1947,7 @@ function App() {
             <LibraryView
               songs={library.songs}
               playlists={library.playlists}
+              gameMode={library.gameMode}
               musicFolder={library.musicFolder}
               currentSongId={currentSong?.id}
               isPlaying={isPlaying}
@@ -1992,7 +2074,7 @@ function App() {
         />
       </Suspense>
 
-      {showNowPlaying && currentSong && (
+      {showNowPlaying && currentSong && !library.gameMode && (
         <NowPlayingView
           song={currentSong}
           coverUrl={currentCoverUrl}
@@ -2025,6 +2107,7 @@ function App() {
         shuffle={shuffle}
         repeatMode={repeatMode}
         queue={queue}
+        gameMode={library.gameMode}
         onTogglePlay={togglePlay}
         onNext={playNext}
         onPrevious={playPrevious}
@@ -2038,7 +2121,7 @@ function App() {
         onPlayQueueItem={playQueueItem}
         onRemoveFromQueue={removeFromQueue}
         onClearQueue={clearQueue}
-        onSongInfoClick={currentSong ? () => setShowNowPlaying(true) : undefined}
+        onSongInfoClick={currentSong && !library.gameMode ? () => setShowNowPlaying(true) : undefined}
         onOpenEqualizer={() => setEqualizerOpen(true)}
       />
 
@@ -2097,6 +2180,8 @@ function App() {
             checkingUpdates={checkingUpdates}
             onRescan={handleRescan}
             isScanning={isScanning}
+            gameMode={library.gameMode}
+            onToggleGameMode={handleToggleGameMode}
           />
         </Suspense>
       )}
