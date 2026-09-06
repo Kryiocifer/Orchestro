@@ -56,6 +56,9 @@ function App() {
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [currentCoverUrl, setCurrentCoverUrl] = useState<string | null>(null);
+  const [discordCoverUrl, setDiscordCoverUrl] = useState<string | null>(null);
+  const discordCoverUrlRef = useRef<string | null>(null);
+  discordCoverUrlRef.current = discordCoverUrl;
   const [queue, setQueue] = useState<Song[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -272,7 +275,24 @@ function App() {
   useEffect(() => {
     if (!currentSong) {
       setCurrentCoverUrl(null);
+      setDiscordCoverUrl(null);
       return;
+    }
+
+    const isOnlineUrl = (u?: string | null) =>
+      !!u && (u.startsWith("http://") || u.startsWith("https://"));
+
+    // If song already has an online cover URL (e.g. YouTube download or enriched art)
+    if (isOnlineUrl(currentSong.cover)) {
+      setDiscordCoverUrl(currentSong.cover!);
+    } else {
+      // Resolve online cover for Discord RPC (iTunes Search)
+      let activeDiscord = true;
+      fetchRemoteCoverArt(currentSong.title, currentSong.artist).then((remote) => {
+        if (activeDiscord && isOnlineUrl(remote)) {
+          setDiscordCoverUrl(remote);
+        }
+      }).catch(() => {});
     }
 
     if (currentSong.cover) {
@@ -302,6 +322,9 @@ function App() {
           if (active) {
             coverCache.set(currentSong.path, remote);
             setCurrentCoverUrl(remote);
+            if (isOnlineUrl(remote)) {
+              setDiscordCoverUrl(remote);
+            }
           }
         }
       })
@@ -314,6 +337,9 @@ function App() {
         if (active) {
           coverCache.set(currentSong.path, remote);
           setCurrentCoverUrl(remote);
+          if (isOnlineUrl(remote)) {
+            setDiscordCoverUrl(remote);
+          }
         }
       });
     return () => { active = false; };
@@ -335,6 +361,13 @@ function App() {
         songs.push(s);
       }
       setLibrary({ ...pruned, songs });
+
+      if (pruned.discordRPC !== undefined) {
+        invoke("set_discord_rpc_enabled", { enabled: pruned.discordRPC }).catch(() => {});
+      }
+      if (pruned.discordClientId) {
+        invoke("set_discord_client_id", { clientId: pruned.discordClientId }).catch(() => {});
+      }
 
       if (!hasCheckedFirstRunRef.current) {
         hasCheckedFirstRunRef.current = true;
@@ -1046,6 +1079,45 @@ function App() {
     }
   }, [currentSong, isPlaying]);
 
+  // Discord Rich Presence synchronization
+  useEffect(() => {
+    if (library.discordRPC === false) {
+      invoke("clear_discord_activity").catch(() => {});
+      return;
+    }
+
+    if (!currentSong) {
+      invoke("clear_discord_activity").catch(() => {});
+      return;
+    }
+
+    const audio = audioRef.current;
+    const curTime = audio && !isNaN(audio.currentTime) ? audio.currentTime : 0;
+    const isUnknown = (val?: string | null) => {
+      if (!val) return true;
+      const s = val.trim().toLowerCase();
+      return (
+        s === "" ||
+        s === "unknown" ||
+        s === "unknown artist" ||
+        s === "unknown author" ||
+        s === "unknown album"
+      );
+    };
+
+    invoke("set_discord_activity", {
+      payload: {
+        title: currentSong.title,
+        artist: isUnknown(currentSong.artist) ? null : currentSong.artist.trim(),
+        album: isUnknown(currentSong.album) ? null : currentSong.album.trim(),
+        duration: currentSong.duration > 0 ? currentSong.duration : null,
+        current_time: curTime,
+        is_playing: isPlaying,
+        cover_url: discordCoverUrl,
+      },
+    }).catch(() => {});
+  }, [currentSong, isPlaying, library.discordRPC, discordCoverUrl]);
+
   // Keyboard + media-key shortcuts
   useEffect(() => {
     const skipOnce = (direction: "next" | "prev") => {
@@ -1118,13 +1190,46 @@ function App() {
       setProgress(percent);
       savedPositionRef.current = pos;
       saveSessionStateRef.current({ position: pos, progress: percent });
+
+      if (library.discordRPC !== false && currentSongRef.current) {
+        const isUnknown = (val?: string | null) => {
+          if (!val) return true;
+          const s = val.trim().toLowerCase();
+          return (
+            s === "" ||
+            s === "unknown" ||
+            s === "unknown artist" ||
+            s === "unknown author" ||
+            s === "unknown album"
+          );
+        };
+
+        invoke("set_discord_activity", {
+          payload: {
+            title: currentSongRef.current.title,
+            artist: isUnknown(currentSongRef.current.artist)
+              ? null
+              : currentSongRef.current.artist.trim(),
+            album: isUnknown(currentSongRef.current.album)
+              ? null
+              : currentSongRef.current.album.trim(),
+            duration:
+              currentSongRef.current.duration > 0
+                ? currentSongRef.current.duration
+                : null,
+            current_time: pos,
+            is_playing: isPlaying,
+            cover_url: discordCoverUrlRef.current,
+          },
+        }).catch(() => {});
+      }
     } else if (currentSongRef.current && currentSongRef.current.duration) {
       const pos = (percent / 100) * currentSongRef.current.duration;
       setProgress(percent);
       savedPositionRef.current = pos;
       saveSessionStateRef.current({ position: pos, progress: percent });
     }
-  }, []);
+  }, [isPlaying, library.discordRPC]);
 
   // ---------- Drag & Drop (Tauri native) ----------
   useEffect(() => {
@@ -1374,6 +1479,32 @@ function App() {
       toast.success("Game Mode enabled. RAM optimized.");
     } else {
       toast.success("Game Mode disabled.");
+    }
+  };
+
+  const handleToggleDiscordRPC = async (enabled: boolean) => {
+    const updated = { ...library, discordRPC: enabled };
+    setLibrary(updated);
+    await saveLibrary(updated);
+    try {
+      await invoke("set_discord_rpc_enabled", { enabled });
+      if (!enabled) {
+        await invoke("clear_discord_activity");
+      }
+    } catch (e) {
+      console.warn("Failed to toggle Discord RPC:", e);
+    }
+    toast.success(enabled ? "Discord Rich Presence enabled" : "Discord Rich Presence disabled");
+  };
+
+  const handleSaveDiscordClientId = async (clientId: string) => {
+    const updated = { ...library, discordClientId: clientId };
+    setLibrary(updated);
+    await saveLibrary(updated);
+    try {
+      await invoke("set_discord_client_id", { clientId });
+    } catch (e) {
+      console.warn("Failed to set Discord Client ID:", e);
     }
   };
 
@@ -2182,6 +2313,10 @@ function App() {
             isScanning={isScanning}
             gameMode={library.gameMode}
             onToggleGameMode={handleToggleGameMode}
+            discordRPC={library.discordRPC}
+            onToggleDiscordRPC={handleToggleDiscordRPC}
+            discordClientId={library.discordClientId}
+            onSaveDiscordClientId={handleSaveDiscordClientId}
           />
         </Suspense>
       )}

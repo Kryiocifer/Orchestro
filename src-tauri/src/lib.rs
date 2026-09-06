@@ -25,6 +25,8 @@ fn hide_console_tokio(cmd: &mut tokio::process::Command) -> &mut tokio::process:
     }
     cmd
 }
+mod discord_rpc;
+
 use std::thread;
 use tauri::{AppHandle, Emitter, Manager, Wry};
 use tauri::menu::{CheckMenuItem, Menu, MenuItem};
@@ -2188,7 +2190,11 @@ pub fn run() {
             fetch_artist_image,
             extract_and_save_cover,
             optimize_memory,
-            sync_tray_game_mode
+            sync_tray_game_mode,
+            set_discord_activity,
+            clear_discord_activity,
+            set_discord_rpc_enabled,
+            set_discord_client_id
         ])
         .setup(|app| {
             let app_data = app.path().app_data_dir().expect("failed to get app data dir");
@@ -2201,13 +2207,24 @@ pub fn run() {
 
             let library_file = app_data.join("library.json");
             let initial_game_mode = if let Ok(data) = std::fs::read_to_string(&library_file) {
-                serde_json::from_str::<serde_json::Value>(&data)
-                    .ok()
-                    .and_then(|v| v.get("gameMode").and_then(|g| g.as_bool()))
-                    .unwrap_or(false)
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&data) {
+                    if let Some(enabled) = val.get("discordRPC").and_then(|v| v.as_bool()) {
+                        discord_rpc::set_rpc_enabled(enabled);
+                    }
+                    if let Some(client_id) = val.get("discordClientId").and_then(|v| v.as_str()) {
+                        if !client_id.trim().is_empty() {
+                            discord_rpc::set_client_id(client_id.trim().to_string());
+                        }
+                    }
+                    val.get("gameMode").and_then(|g| g.as_bool()).unwrap_or(false)
+                } else {
+                    false
+                }
             } else {
                 false
             };
+
+            discord_rpc::start_discord_worker();
 
             let game_mode_item = CheckMenuItem::with_id(
                 app,
@@ -2624,4 +2641,29 @@ fn sync_tray_game_mode(enabled: bool) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[tauri::command]
+fn set_discord_activity(payload: discord_rpc::ActivityPayload) -> Result<(), String> {
+    discord_rpc::update_activity(payload);
+    Ok(())
+}
+
+#[tauri::command]
+fn clear_discord_activity() -> Result<(), String> {
+    discord_rpc::clear_activity();
+    Ok(())
+}
+
+#[tauri::command]
+fn set_discord_rpc_enabled(enabled: bool) -> Result<(), String> {
+    discord_rpc::set_rpc_enabled(enabled);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_discord_client_id(client_id: String) -> Result<(), String> {
+    discord_rpc::set_client_id(client_id);
+    Ok(())
+}
+
 

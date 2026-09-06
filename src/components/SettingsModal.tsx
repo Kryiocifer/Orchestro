@@ -26,6 +26,10 @@ interface SettingsModalProps {
   isScanning?: boolean;
   gameMode?: boolean;
   onToggleGameMode?: (enabled: boolean) => void;
+  discordRPC?: boolean;
+  onToggleDiscordRPC?: (enabled: boolean) => void;
+  discordClientId?: string | null;
+  onSaveDiscordClientId?: (id: string) => void;
 }
 
 export default function SettingsModal({
@@ -41,7 +45,16 @@ export default function SettingsModal({
   isScanning,
   gameMode,
   onToggleGameMode,
+  discordRPC,
+  onToggleDiscordRPC,
+  discordClientId,
+  onSaveDiscordClientId,
 }: SettingsModalProps) {
+  const [clientIdInput, setClientIdInput] = useState(discordClientId || "");
+
+  useEffect(() => {
+    setClientIdInput(discordClientId || "");
+  }, [discordClientId]);
   const [ytdlpStatus, setYtdlpStatus] = useState<{
     available: boolean;
     version: string | null;
@@ -352,6 +365,83 @@ export default function SettingsModal({
                   )}
                 />
               </button>
+            </div>
+          </div>
+
+          {/* Section: Discord Rich Presence */}
+          <div className="px-6 py-5 border-b border-white/5">
+            <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-spotify-lightgray/50">
+              Integrations
+            </p>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.03] px-4 py-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-white">Discord Rich Presence</p>
+                    <span className="rounded bg-[#5865F2]/20 px-1.5 py-px text-[10px] font-semibold text-[#5865F2]">
+                      Discord RPC
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-spotify-lightgray max-w-[320px]">
+                    Display your current song, artist, and live playback progress bar on your Discord profile.
+                  </p>
+                </div>
+                <button
+                  onClick={() => onToggleDiscordRPC?.(discordRPC ?? true ? false : true)}
+                  className={cn(
+                    "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                    (discordRPC ?? true) ? "bg-[#5865F2]" : "bg-white/20"
+                  )}
+                  role="switch"
+                  aria-checked={discordRPC ?? true}
+                >
+                  <span
+                    className={cn(
+                      "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                      (discordRPC ?? true) ? "translate-x-4" : "translate-x-0"
+                    )}
+                  />
+                </button>
+              </div>
+
+              {(discordRPC ?? true) && (
+                <div className="rounded-lg bg-white/[0.02] p-4 border border-white/5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-white/80">
+                      Discord Application ID (Optional)
+                    </label>
+                    <a
+                      href="https://discord.com/developers/applications"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] text-[#5865F2] hover:underline"
+                    >
+                      Developer Portal ↗
+                    </a>
+                  </div>
+                  <p className="text-[11px] text-spotify-lightgray">
+                    Want your own custom name or icon on Discord? Create an application on the Discord Developer Portal and paste its Application ID here. Leave blank for default.
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="1546083032195403897 (Default)"
+                      value={clientIdInput}
+                      onChange={(e) => setClientIdInput(e.target.value)}
+                      className="flex-1 rounded-md bg-white/5 px-3 py-1.5 text-xs text-white placeholder-white/20 border border-white/10 focus:border-[#5865F2] focus:outline-none"
+                    />
+                    <button
+                      onClick={() => {
+                        onSaveDiscordClientId?.(clientIdInput.trim());
+                        toast.success("Discord Application ID saved");
+                      }}
+                      className="rounded-md bg-white/10 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/20 transition"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

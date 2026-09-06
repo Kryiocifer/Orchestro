@@ -9,15 +9,20 @@ const coverCache = new Map<string, string | null>();
 
 async function fetchItunesCoverArt(title: string, artist: string): Promise<string | null> {
   try {
-    const query = [title, artist].filter(Boolean).join(" ");
+    const cleanArt = cleanArtistName(artist);
+    const cleanTit = cleanTrackTitle(title);
+    const query = [cleanTit, cleanArt].filter(Boolean).join(" ");
     const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=5`;
     const res = await fetch(url);
     if (!res.ok) return null;
     const json = await res.json();
     const results: any[] = json.results ?? [];
     if (results.length === 0) return null;
-    const lower = title.toLowerCase();
-    const best = results.find((r) => r.trackName?.toLowerCase().includes(lower)) ?? results[0];
+    const lower = cleanTit.toLowerCase();
+    const best = results.find((r) => {
+      const tn = (r.trackName || "").toLowerCase();
+      return tn.includes(lower) || lower.includes(tn);
+    }) ?? results[0];
     const art100: string = best.artworkUrl100 ?? "";
     if (!art100) return null;
     return art100.replace("100x100bb", "600x600bb");

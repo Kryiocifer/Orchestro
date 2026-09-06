@@ -3,7 +3,6 @@ import {
   Home,
   Library,
   Plus,
-  Music2,
   Trash2,
   ListMusic,
   RefreshCw,
@@ -52,7 +51,11 @@ export default function Sidebar({
     <aside className="flex h-full w-[260px] min-h-0 shrink-0 flex-col bg-spotify-darker px-3 py-5 select-none overflow-hidden">
       {/* Logo */}
       <div className="mb-6 flex shrink-0 items-center gap-2.5 px-3">
-        <Music2 className="h-8 w-8 text-spotify-green" />
+        <img
+          src="/orchestro.png"
+          alt="Orchestro"
+          className="h-10 w-10 shrink-0 object-contain"
+        />
         <span className="text-xl font-bold tracking-tight">Orchestro</span>
       </div>
 

@@ -7,10 +7,13 @@ Orchestro is a modern, lightweight, offline-first desktop music player and downl
 ## Features
 
 - **High Performance and Lightweight**: Maintains a minimal RAM and CPU footprint, powered by Tauri 2 and native Rust audio handling.
+- **Game Mode & OS Working Set Trimming**: Dedicated gaming optimization mode that trims physical memory down to ~23 MB (~96% RAM reduction) via native Windows kernel routines (`K32EmptyWorkingSet`), pauses background album art workers, unloads heavy textures, and syncs directly with the system tray context menu.
+- **Discord Rich Presence (Discord RPC)**: Seamlessly broadcasts current listening activity to Discord using official Orchestro assets (`1546083032195403897`), rendering track details, artist, album, and a live synchronized progress bar (`00:13 ──🔘────────────── 02:41`). Fully resilient and active during Game Mode.
 - **Smart Library Navigation**: Allows users to point to their local music library folder. Browse all tracks comprehensively or filter by subfolder using the built-in navigation tabs.
 - **Immersive "Now Playing" View**: Provides a full-screen view with a dynamic blurred background, high-resolution album artwork, progress tracking, and comprehensive media controls.
 - **Session Persistence**: Automatically saves and restores the exact playback state across application restarts, including the current track, elapsed time, queue order, volume, and playback modes (shuffle and repeat).
-- **System Tray Integration**: Minimizes to the system tray on close. Features a native tray menu for instant restoration or application exit, preventing accidental interruptions during playback.
+- **System Tray Integration**: Minimizes to the system tray on close. Features a native tray menu with playback controls, Game Mode toggle, and instant restoration.
+- **Spotify Dark Aesthetic**: Crafted with a sleek Spotify-inspired Charcoal & Neon Green (`#1DB954`) theme, high-contrast typography, and smooth transitions.
 - **Playlist Downloader**: Includes a built-in downloader powered by `yt-dlp` and `ffmpeg`. Downloading public playlists creates an organized directory with automatically tagged metadata and artwork.
 - **Advanced Queue Management**: Supports queuing individual tracks or bulk selections to play next without disrupting the current playlist sequence.
 - **Metadata Extraction**: Automatically parses titles, artists, albums, durations, and embedded cover art for various audio formats including `.mp3`, `.flac`, `.wav`, `.ogg`, and `.m4a`.
@@ -131,29 +134,35 @@ When you push a version tag (e.g., `v2.3.1`) or manually trigger the workflow:
 
 ```text
 Orchestro/
+├── public/                      # Static web assets & favicons
 ├── src/                         # React Frontend Interface
 │   ├── components/
 │   │   ├── ContextMenu.tsx      # Right-click context actions
 │   │   ├── DownloadPanel.tsx    # Live download queue and progress tracking
-│   │   ├── HomeView.tsx         # Quick access and recently played tracks
+│   │   ├── EqualizerModal.tsx   # 10-band audio graphic equalizer & presets
+│   │   ├── HomeView.tsx         # Quick access, recents, and top tracks
 │   │   ├── ImportView.tsx       # Spotify and YouTube playlist importer
 │   │   ├── LibraryView.tsx      # Filterable song library and folder tabs
-│   │   ├── NowPlayingView.tsx   # Full-screen immersive player view
+│   │   ├── NowPlayingView.tsx   # Full-screen immersive player & lyrics view
 │   │   ├── PlayerBar.tsx        # Persistent bottom player controls
 │   │   ├── PlaylistView.tsx     # Custom playlists and track listings
+│   │   ├── SettingsModal.tsx    # App preferences, Game Mode & Discord RPC
 │   │   ├── Sidebar.tsx          # Navigation and library links
 │   │   └── YouTubeView.tsx      # In-app YouTube search and streaming
 │   ├── lib/
 │   │   ├── library.ts           # Storage, scanning, and metadata parsing logic
+│   │   ├── metadata.ts          # Cover art resolution & tag extraction
 │   │   ├── types.ts             # TypeScript interfaces and type definitions
 │   │   └── utils.ts             # Formatting and helper utilities
 │   ├── styles/                  # Tailwind CSS and global style definitions
 │   ├── App.tsx                  # Main application container and state orchestration
 │   └── main.tsx                 # React entry point and toast configuration
 ├── src-tauri/                   # Rust Backend
+│   ├── icons/                   # Multi-resolution platform app & tray icons
 │   ├── src/
 │   │   ├── main.rs              # Application entry point
-│   │   └── lib.rs               # Commands (audio streaming, yt-dlp, tray, file system)
+│   │   ├── lib.rs               # Commands (audio, OS memory trimming, tray, fs)
+│   │   └── discord_rpc.rs       # Native Discord Rich Presence IPC client
 │   ├── Cargo.toml               # Rust dependencies and metadata
 │   └── tauri.conf.json          # Tauri v2 configuration and window settings
 ├── package.json                 # Node dependencies and build scripts
