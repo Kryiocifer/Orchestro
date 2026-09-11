@@ -71,6 +71,16 @@ function extractMetadata(rawTitle: string): { songName: string; artistName: stri
     .replace(/^@[\w\s.]+\s*-\s*/i, "")
     .trim();
 
+  // Normalize unicode lookalikes
+  title = title
+    .replace(/⧸/g, "/")
+    .replace(/＊/g, "*")
+    .replace(/：/g, ":")
+    .replace(/‘/g, "'")
+    .replace(/’/g, "'")
+    .replace(/“/g, '"')
+    .replace(/”/g, '"');
+
   // Strip parenthetical fluff FIRST so it doesn't mess up later parsing
   title = title
     .replace(/\(.*?(official|lyric|audio|video|live|amv|slowed|sped|visualizer).*?\)/gi, "")
@@ -120,7 +130,6 @@ function extractMetadata(rawTitle: string): { songName: string; artistName: stri
     right = stripYtFluff(right);
     right = right.replace(/\s*(official|lyric|video|audio|visualizer)\s*$/gi, "");
 
-
     const numbered = /^\d{1,3}\.\s+/.test(left);
     const leftLooksLikeTitle =
       numbered ||
@@ -141,6 +150,14 @@ function extractMetadata(rawTitle: string): { songName: string; artistName: stri
   // Final cleanup for random quotes, trailing underscores (e.g., _I can't move on_), or features
   songPart = songPart.replace(/_.*?_/g, "").replace(/".*?"/g, "").replace(/_.*$/, "").trim();
   songPart = stripYtFluff(songPart);
+
+  // Deep clean for specific phrases usually appended to song titles
+  songPart = songPart
+    .replace(/\s*\([^)]*\b(from|ost|soundtrack|album)\b[^)]*\)\s*/gi, "")
+    .replace(/\s*\[[^\]]*\b(from|ost|soundtrack|album)\b[^\]]*\]\s*/gi, "")
+    .replace(/\s*M\/?V\s*$/gi, "")
+    .replace(/\s*\b(from|ost|soundtrack)\b\s*.*$/gi, "")
+    .trim();
 
   return { songName: songPart, artistName: artistPart };
 }
@@ -174,7 +191,8 @@ function stripYtFluff(s: string): string {
     .replace(/\s*Best Part Slowed Reverb.*$/gi, "")
     .replace(/\s*-\s*gabinp.*$/gi, "")
     .replace(/\s*SuzumeTheme Song.*$/gi, "Suzume")
-    .replace(/\s*\(?(feat\.|ft\.).*?\)?\s*/gi, "") // Remove features
+    .replace(/\s*\b(feat\.|ft\.|feat\s|ft\s)[^)]*(?=\)|$)/gi, "") // Remove features correctly
+    .replace(/\(\s*\)/g, "") // clean up empty parens left by feature stripping
     .trim();
 }
 
@@ -232,7 +250,10 @@ export async function enrichSong(song: Song, force: boolean = false): Promise<En
       };
     }
 
-    const query = artistName ? `${artistName} ${songName}` : songName;
+    let query = artistName ? `${artistName} ${songName}` : songName;
+    // Strip punctuation to avoid breaking the iTunes search engine (e.g., 'B*tch' -> 'B tch')
+    query = query.replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim();
+    
     const resString = await invoke<string>("search_itunes", { query });
     const json = JSON.parse(resString);
     const results: any[] = json.results ?? [];
@@ -241,17 +262,16 @@ export async function enrichSong(song: Song, force: boolean = false): Promise<En
 
     const cleanedFallback = (): EnrichmentResult => ({
       songId: song.id,
-      // Keep the original name minus [id] only — do not rebuild from parsed parts
-      title: cleanedSource || songName,
+      title: songName || song.title,
       artist: artistName || (song.artist !== "Unknown Artist" ? song.artist : "Unknown Artist"),
-      album: song.album,
+      album: "",
       artworkUrl: "",
       status: "cleaned",
-      reason: "Stripped junk id; iTunes had no confident match",
+      reason: "No confident iTunes match; scrubbed local metadata",
     });
 
     if (results.length === 0) {
-      return hasJunkId(song) || cleanedSource !== (song.title || "")
+      return force || hasJunkId(song) || songName !== song.title
         ? cleanedFallback()
         : {
             songId: song.id,
@@ -289,15 +309,17 @@ export async function enrichSong(song: Song, force: boolean = false): Promise<En
 
     // Threshold of 0.45 ensures we don't apply totally unrelated metadata
     if (best.score < 0.45) {
-      return hasJunkId(song) ? cleanedFallback() : {
-        songId: song.id,
-        title: song.title,
-        artist: song.artist,
-        album: song.album,
-        artworkUrl: "",
-        status: "no_match",
-        reason: `Low confidence: "${best.trackName}" (score ${best.score.toFixed(2)})`,
-      };
+      return force || hasJunkId(song) || songName !== song.title
+        ? cleanedFallback() 
+        : {
+            songId: song.id,
+            title: song.title,
+            artist: song.artist,
+            album: song.album,
+            artworkUrl: "",
+            status: "no_match",
+            reason: `Low confidence: "${best.trackName}" (score ${best.score.toFixed(2)})`,
+          };
     }
 
     const artworkUrl = (best.artworkUrl100 ?? "").replace("100x100bb", "600x600bb");
@@ -333,11 +355,8 @@ export async function applyEnrichment(song: Song, result: EnrichmentResult): Pro
   // Generate safe filename (remove invalid chars for Windows/Mac/Linux)
   const safeArtist = (result.artist || "Unknown Artist").replace(/[<>:"/\\|?*]/g, "").trim();
   const safeTitle = result.title.replace(/[<>:"/\\|?*]/g, "").trim();
-  // cleaned = original filename minus [id] only (title already holds that full string)
   const newFileName =
-    result.status === "cleaned"
-      ? safeTitle
-      : safeArtist && safeArtist !== "Unknown Artist"
+    safeArtist && safeArtist !== "Unknown Artist"
       ? `${safeArtist} - ${safeTitle}`
       : safeTitle;
 

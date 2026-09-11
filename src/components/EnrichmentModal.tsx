@@ -97,7 +97,7 @@ export default function EnrichmentModal({ songs, onClose, onComplete }: Props) {
   const statusLabel = (entry: LogEntry) => {
     switch (entry.status) {
       case "updated": return <span className="text-green-400">→ {entry.title} · {entry.artist}</span>;
-      case "cleaned": return <span className="text-sky-400">Renamed (no iTunes match) — {entry.title}</span>;
+      case "cleaned": return <span className="text-sky-400">Renamed (no iTunes match) — {entry.title} · {entry.artist}</span>;
       case "skipped": return <span className="text-white/30">Skipped — {entry.reason}</span>;
       case "no_match": return <span className="text-yellow-400">No match — {entry.reason}</span>;
       case "error": return <span className="text-red-400">Error — {entry.reason}</span>;
