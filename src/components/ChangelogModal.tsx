@@ -20,7 +20,7 @@ function parseInline(text: string): React.ReactNode[] {
     const codeMatch = current.match(/`(.+?)`/);
     const linkMatch = current.match(/\[([^\]]+)\]\(([^)]+)\)/);
 
-    let match = null;
+    let match: RegExpMatchArray | null = null;
     let type = "";
     if (boldMatch && (!match || boldMatch.index! < match.index!)) {
       match = boldMatch; type = "bold";
