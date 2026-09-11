@@ -22,7 +22,7 @@ function parseInline(text: string): React.ReactNode[] {
 
     let match: RegExpMatchArray | null = null;
     let type = "";
-    if (boldMatch && (!match || boldMatch.index! < match.index!)) {
+    if (boldMatch) {
       match = boldMatch; type = "bold";
     }
     if (codeMatch && (!match || codeMatch.index! < match.index!)) {
