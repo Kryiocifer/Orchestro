@@ -9,6 +9,55 @@ interface ChangelogModalProps {
   body: string;
 }
 
+function parseInline(text: string): React.ReactNode[] {
+  // Simple tokenizer for bold, code, and links.
+  const parts: React.ReactNode[] = [];
+  let current = text;
+  let key = 0;
+
+  while (current) {
+    const boldMatch = current.match(/\*\*(.+?)\*\*/);
+    const codeMatch = current.match(/`(.+?)`/);
+    const linkMatch = current.match(/\[([^\]]+)\]\(([^)]+)\)/);
+
+    let match = null;
+    let type = "";
+    if (boldMatch && (!match || boldMatch.index! < match.index!)) {
+      match = boldMatch; type = "bold";
+    }
+    if (codeMatch && (!match || codeMatch.index! < match.index!)) {
+      match = codeMatch; type = "code";
+    }
+    if (linkMatch && (!match || linkMatch.index! < match.index!)) {
+      match = linkMatch; type = "link";
+    }
+
+    if (!match) {
+      parts.push(<span key={key++}>{current}</span>);
+      break;
+    }
+
+    if (match.index! > 0) {
+      parts.push(<span key={key++}>{current.slice(0, match.index!)}</span>);
+    }
+
+    if (type === "bold") {
+      parts.push(<strong key={key++} className="font-bold text-white">{match[1]}</strong>);
+    } else if (type === "code") {
+      parts.push(<code key={key++} className="bg-white/10 text-spotify-lightgray px-1 py-0.5 rounded text-xs font-mono">{match[1]}</code>);
+    } else if (type === "link") {
+      parts.push(
+        <a key={key++} href={match[2]} target="_blank" rel="noreferrer" className="text-spotify-green hover:underline">
+          {match[1]}
+        </a>
+      );
+    }
+
+    current = current.slice(match.index! + match[0].length);
+  }
+  return parts;
+}
+
 function renderMarkdown(body: string) {
   const lines = body.split("\n");
   const elements: React.ReactNode[] = [];
@@ -23,44 +72,47 @@ function renderMarkdown(body: string) {
       continue;
     }
 
-    // h2
-    if (trimmed.startsWith("## ")) {
+    // Headers
+    const headerMatch = trimmed.match(/^(#{1,6})\s+(.*)/);
+    if (headerMatch) {
+      const level = headerMatch[1].length;
+      const content = parseInline(headerMatch[2]);
+      if (level === 1 || level === 2) {
+        elements.push(<h2 key={i} className="mt-5 mb-2 text-sm font-bold text-white">{content}</h2>);
+      } else {
+        elements.push(<h3 key={i} className="mt-4 mb-2 text-xs font-semibold uppercase tracking-widest text-spotify-lightgray/70">{content}</h3>);
+      }
+      i++;
+      continue;
+    }
+
+    // Blockquote
+    if (trimmed.startsWith("> ")) {
       elements.push(
-        <h3 key={i} className="mt-5 mb-2 text-xs font-semibold uppercase tracking-widest text-spotify-lightgray/50">
-          {trimmed.slice(3)}
-        </h3>
+        <blockquote key={i} className="border-l-2 border-white/20 pl-3 italic text-spotify-lightgray/80 my-2">
+          {parseInline(trimmed.slice(2))}
+        </blockquote>
       );
       i++;
       continue;
     }
 
-    // h1
-    if (trimmed.startsWith("# ")) {
-      elements.push(
-        <h2 key={i} className="mt-5 mb-2 text-sm font-bold text-white">
-          {trimmed.slice(2)}
-        </h2>
-      );
-      i++;
-      continue;
-    }
-
-    // bullet list — collect consecutive items
+    // Bullet list
     if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-      const items: string[] = [];
+      const items: React.ReactNode[][] = [];
       while (
         i < lines.length &&
         (lines[i].trim().startsWith("- ") || lines[i].trim().startsWith("* "))
       ) {
-        items.push(lines[i].trim().slice(2));
+        items.push(parseInline(lines[i].trim().slice(2)));
         i++;
       }
       elements.push(
-        <ul key={`ul-${i}`} className="mt-1 space-y-1.5">
+        <ul key={`ul-${i}`} className="mt-1 mb-3 space-y-1.5">
           {items.map((item, j) => (
             <li key={j} className="flex items-start gap-2 text-sm text-spotify-lightgray">
-              <span className="mt-[6px] h-1 w-1 shrink-0 rounded-full bg-spotify-lightgray/40" />
-              <span>{item}</span>
+              <span className="mt-[6px] h-1.5 w-1.5 shrink-0 rounded-full bg-spotify-lightgray/40" />
+              <span className="flex-1">{item}</span>
             </li>
           ))}
         </ul>
@@ -68,10 +120,10 @@ function renderMarkdown(body: string) {
       continue;
     }
 
-    // paragraph
+    // Paragraph
     elements.push(
-      <p key={i} className="mt-1 text-sm leading-relaxed text-spotify-lightgray">
-        {trimmed}
+      <p key={i} className="mt-1 mb-2 text-sm leading-relaxed text-spotify-lightgray">
+        {parseInline(trimmed)}
       </p>
     );
     i++;

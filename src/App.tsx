@@ -1064,8 +1064,9 @@ function App() {
       return;
     }
     try {
-      const artwork = currentCoverUrl
-        ? [{ src: currentCoverUrl, sizes: "512x512", type: "image/png" }]
+      const bestArtworkUrl = discordCoverUrl || currentCoverUrl;
+      const artwork = bestArtworkUrl
+        ? [{ src: bestArtworkUrl, sizes: "512x512", type: "image/png" }]
         : [];
       navigator.mediaSession.metadata = new MediaMetadata({
         title: currentSong.title,
@@ -1077,7 +1078,7 @@ function App() {
     } catch (err) {
       console.warn("MediaMetadata failed:", err);
     }
-  }, [currentSong, currentCoverUrl, isPlaying]);
+  }, [currentSong, currentCoverUrl, discordCoverUrl, isPlaying]);
 
   // Discord Rich Presence synchronization
   useEffect(() => {
