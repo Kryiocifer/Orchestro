@@ -2194,7 +2194,8 @@ pub fn run() {
             set_discord_activity,
             clear_discord_activity,
             set_discord_rpc_enabled,
-            set_discord_client_id
+            set_discord_client_id,
+            search_itunes
         ])
         .setup(|app| {
             let app_data = app.path().app_data_dir().expect("failed to get app data dir");
@@ -2440,15 +2441,22 @@ async fn write_song_tags(
 #[tauri::command]
 async fn get_song_cover(path: String) -> Result<Option<String>, String> {
     use base64::{Engine as _, engine::general_purpose};
+    use lofty::file::TaggedFileExt;
     
-    let tag = match id3::Tag::read_from_path(&path) {
+    let tagged_file = match lofty::read_from_path(&path) {
         Ok(t) => t,
         Err(_) => return Ok(None)
     };
 
-    if let Some(pic) = tag.pictures().next() {
-        let b64 = general_purpose::STANDARD.encode(&pic.data);
-        return Ok(Some(format!("data:{};base64,{}", pic.mime_type, b64)));
+    let tag = match tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+        Some(t) => t,
+        None => return Ok(None)
+    };
+
+    if let Some(pic) = tag.pictures().first() {
+        let b64 = general_purpose::STANDARD.encode(pic.data());
+        let mime = pic.mime_type().map(|m| m.as_str()).unwrap_or("image/jpeg");
+        return Ok(Some(format!("data:{};base64,{}", mime, b64)));
     }
     
     Ok(None)
@@ -2658,6 +2666,13 @@ fn clear_discord_activity() -> Result<(), String> {
 fn set_discord_rpc_enabled(enabled: bool) -> Result<(), String> {
     discord_rpc::set_rpc_enabled(enabled);
     Ok(())
+}
+
+#[tauri::command]
+async fn search_itunes(query: String) -> Result<String, String> {
+    let url = format!("https://itunes.apple.com/search?term={}&entity=song&limit=5", urlencoding::encode(&query));
+    let res = reqwest::get(&url).await.map_err(|e| e.to_string())?;
+    res.text().await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

@@ -30,7 +30,7 @@ export default function EnrichmentModal({ songs, onClose, onComplete }: Props) {
     }
   }, [log]);
 
-  const run = async () => {
+  const run = async (force: boolean = false) => {
     setRunning(true);
     setDone(false);
     setLog([]);
@@ -43,7 +43,7 @@ export default function EnrichmentModal({ songs, onClose, onComplete }: Props) {
       if (cancelRef.current) break;
 
       const song = songs[i];
-      const result = await enrichSong(song);
+      const result = await enrichSong(song, force);
 
       if ((result.status === "updated" || result.status === "cleaned") && !cancelRef.current) {
         try {
@@ -193,7 +193,13 @@ export default function EnrichmentModal({ songs, onClose, onComplete }: Props) {
                 Cancel
               </button>
               <button
-                onClick={run}
+                onClick={() => run(true)}
+                className="rounded-md bg-white/10 px-5 py-1.5 text-sm font-medium text-white transition hover:bg-white/20 active:bg-white/30"
+              >
+                Force All
+              </button>
+              <button
+                onClick={() => run(false)}
                 className="rounded-md bg-white px-5 py-1.5 text-sm font-medium text-black transition hover:bg-gray-200 active:bg-gray-300"
               >
                 Start

@@ -33,6 +33,7 @@ open = "5"
 id3 = "1.1.0"
 image = "0.24.7"
 zip = "0.6.3"
+lofty = "0.25.1"
 
 [profile.release]
 panic = "abort"

@@ -179,7 +179,8 @@ function stripYtFluff(s: string): string {
 }
 
 /**
- * Simple token-overlap similarity score (0–1).
+ * Token-based similarity score (0–1).
+ * Uses a blend of containment (to forgive missing features) and Jaccard similarity.
  */
 function similarity(a: string, b: string): number {
   const clean = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, "").split(/\s+/).filter(Boolean);
@@ -187,15 +188,24 @@ function similarity(a: string, b: string): number {
   const tokB = new Set(clean(b));
   let matches = 0;
   for (const t of tokA) if (tokB.has(t)) matches++;
+  
   const union = new Set([...tokA, ...tokB]).size;
-  return union === 0 ? 0 : matches / union;
+  if (union === 0) return 0;
+  
+  const minLen = Math.min(tokA.size, tokB.size);
+  if (minLen === 0) return 0;
+
+  const containment = matches / minLen;
+  const jaccard = matches / union;
+  
+  return (containment * 0.7) + (jaccard * 0.3);
 }
 
 /**
  * Enrich a single song via the iTunes Search API.
  */
-export async function enrichSong(song: Song): Promise<EnrichmentResult> {
-  if (!needsEnrichment(song)) {
+export async function enrichSong(song: Song, force: boolean = false): Promise<EnrichmentResult> {
+  if (!force && !needsEnrichment(song)) {
     return {
       songId: song.id,
       title: song.title,
@@ -223,12 +233,8 @@ export async function enrichSong(song: Song): Promise<EnrichmentResult> {
     }
 
     const query = artistName ? `${artistName} ${songName}` : songName;
-    const res = await fetch(
-      `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=5`
-    );
-    if (!res.ok) throw new Error(`iTunes HTTP ${res.status}`);
-
-    const json = await res.json();
+    const resString = await invoke<string>("search_itunes", { query });
+    const json = JSON.parse(resString);
     const results: any[] = json.results ?? [];
     // Drop the rest of the payload immediately — keep 5 small objects max
     json.results = undefined;
@@ -258,20 +264,31 @@ export async function enrichSong(song: Song): Promise<EnrichmentResult> {
           };
     }
 
-    // Score by title similarity
+    // Score by similarity
     const scored = results
-      .map((r) => ({
-        trackName: r.trackName as string | undefined,
-        artistName: r.artistName as string | undefined,
-        collectionName: r.collectionName as string | undefined,
-        artworkUrl100: r.artworkUrl100 as string | undefined,
-        score: similarity(songName, r.trackName ?? ""),
-      }))
+      .map((r) => {
+        const titleScore = similarity(songName, r.trackName ?? "");
+        let finalScore = titleScore;
+        
+        if (artistName && artistName.toLowerCase() !== "unknown artist") {
+          const artistScore = similarity(artistName, r.artistName ?? "");
+          // Weight title heavier than artist, but both must somewhat match
+          finalScore = (titleScore * 0.6) + (artistScore * 0.4);
+        }
+
+        return {
+          trackName: r.trackName as string | undefined,
+          artistName: r.artistName as string | undefined,
+          collectionName: r.collectionName as string | undefined,
+          artworkUrl100: r.artworkUrl100 as string | undefined,
+          score: finalScore,
+        };
+      })
       .sort((a, b) => b.score - a.score);
     const best = scored[0];
 
-    // Lower threshold now that queries are clean: 30% token overlap
-    if (best.score < 0.3) {
+    // Threshold of 0.45 ensures we don't apply totally unrelated metadata
+    if (best.score < 0.45) {
       return hasJunkId(song) ? cleanedFallback() : {
         songId: song.id,
         title: song.title,
